@@ -12,8 +12,6 @@ terraform {
     }
   }
 
-  # Local state for now (fine for a single-person case study). If working
-  # in a team, switch this to an S3 backend with a DynamoDB lock table.
   backend "local" {
     path = "terraform.tfstate"
   }

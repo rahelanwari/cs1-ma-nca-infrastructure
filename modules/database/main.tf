@@ -8,19 +8,11 @@ locals {
   }
 }
 
-# ---------------------------------------------------------------------------
-# Generated application-user password - never hardcoded
-# ---------------------------------------------------------------------------
-
 resource "random_password" "db" {
   length           = 20
   special          = true
   override_special = "!#$%&*()-_=+[]{}<>:?"
 }
-
-# ---------------------------------------------------------------------------
-# Latest Amazon Linux 2023 AMI
-# ---------------------------------------------------------------------------
 
 data "aws_ami" "amazon_linux" {
   most_recent = true
@@ -31,15 +23,6 @@ data "aws_ami" "amazon_linux" {
     values = ["al2023-ami-*-x86_64"]
   }
 }
-
-# ---------------------------------------------------------------------------
-# IT staff access (REQ-NCA-P1-02 / 2.3: "only accessible by the web servers
-# and IT staff"). Session Manager gives authorized IAM users a browser-based
-# shell on the instance with no SSH key, no open inbound port, and no bastion
-# host - access is controlled entirely through IAM, and every command is
-# logged. Outbound HTTPS to the SSM endpoints already works via the existing
-# NAT Gateway, so no security group changes are needed.
-# ---------------------------------------------------------------------------
 
 resource "aws_iam_role" "ec2_ssm" {
   name = "${local.name_prefix}-ec2-ssm-role"
@@ -66,13 +49,6 @@ resource "aws_iam_instance_profile" "ec2_ssm" {
   role = aws_iam_role.ec2_ssm.name
 }
 
-# ---------------------------------------------------------------------------
-# Self-managed MySQL-compatible database (MariaDB) on EC2 - replaces RDS,
-# which is blocked by an organization-level Service Control Policy in this
-# sandbox. Same network placement and security group as the original RDS
-# design: private data-tier subnet, only reachable from the app tier.
-# ---------------------------------------------------------------------------
-
 resource "aws_instance" "mysql" {
   ami                    = data.aws_ami.amazon_linux.id
   instance_type          = var.instance_type
@@ -85,13 +61,6 @@ resource "aws_instance" "mysql" {
     volume_type = "gp3"
   }
 
-  # Installs and configures MariaDB (MySQL-compatible) on first boot.
-  # Note: the password is embedded here because Terraform renders it at
-  # apply time - it ends up in the instance's user_data (visible to anyone
-  # with EC2 describe-instance-attribute permissions) and in Terraform
-  # state, same trade-off as the credentials we already store in Secrets
-  # Manager below. Acceptable for this case study; a production setup
-  # would fetch the secret at boot via an IAM instance profile instead.
   user_data = <<-EOT
     #!/bin/bash
     set -e
@@ -106,18 +75,36 @@ resource "aws_instance" "mysql" {
 
     sed -i "s/^bind-address.*/bind-address = 0.0.0.0/" /etc/my.cnf.d/mariadb-server.cnf || true
     systemctl restart mariadb
+
+    useradd --no-create-home --shell /usr/sbin/nologin node_exporter || true
+    curl -sL https://github.com/prometheus/node_exporter/releases/download/v1.8.2/node_exporter-1.8.2.linux-amd64.tar.gz -o /tmp/node_exporter.tar.gz
+    tar xzf /tmp/node_exporter.tar.gz -C /tmp
+    cp /tmp/node_exporter-1.8.2.linux-amd64/node_exporter /usr/local/bin/
+    chown node_exporter:node_exporter /usr/local/bin/node_exporter
+
+    cat <<'SERVICE' > /etc/systemd/system/node_exporter.service
+    [Unit]
+    Description=Node Exporter
+    After=network.target
+
+    [Service]
+    User=node_exporter
+    Group=node_exporter
+    Type=simple
+    ExecStart=/usr/local/bin/node_exporter
+
+    [Install]
+    WantedBy=multi-user.target
+    SERVICE
+
+    systemctl daemon-reload
+    systemctl enable --now node_exporter
   EOT
 
   tags = merge(local.common_tags, {
     Name = "${local.name_prefix}-mysql"
   })
 }
-
-# ---------------------------------------------------------------------------
-# Store credentials in Secrets Manager - same as the RDS design, so the
-# app tier looks credentials up the same way regardless of which backend
-# actually runs the database.
-# ---------------------------------------------------------------------------
 
 resource "aws_secretsmanager_secret" "db_credentials" {
   name = "${local.name_prefix}-db-credentials"

@@ -52,3 +52,18 @@ output "db_secret_arn" {
   description = "Secrets Manager ARN holding the DB credentials"
   value       = module.database.secret_arn
 }
+
+output "grafana_url" {
+  description = "Grafana dashboard URL"
+  value       = module.monitoring.grafana_url
+}
+
+output "grafana_admin_secret_arn" {
+  description = "Secrets Manager ARN holding the Grafana admin username/password"
+  value       = module.monitoring.grafana_admin_secret_arn
+}
+
+output "sns_topic_arn" {
+  description = "SNS topic ARN that CloudWatch alarms notify"
+  value       = module.monitoring.sns_topic_arn
+}

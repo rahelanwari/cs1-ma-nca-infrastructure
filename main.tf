@@ -3,11 +3,6 @@ module "network" {
 
   project_name = var.project_name
   environment  = var.environment
-
-  # Defaults from the module already match the Week 1 design
-  # (10.0.0.0/16 VPC, 2 AZs, public/app/data subnets).
-  # Override here if needed, e.g.:
-  # availability_zones = ["eu-west-1a", "eu-west-1c"]
 }
 
 module "compute" {
@@ -16,19 +11,12 @@ module "compute" {
   project_name = var.project_name
   environment  = var.environment
 
-  vpc_id                 = module.network.vpc_id
-  public_subnet_ids      = module.network.public_subnet_ids
-  app_subnet_ids         = module.network.app_subnet_ids
-  alb_security_group_id  = module.network.alb_security_group_id
-  app_security_group_id  = module.network.app_security_group_id
-
-  # Defaults already match Week 1 (baseline 2 tasks, peak up to 10,
-  # scaling on 60% CPU). Override here if needed, e.g.:
-  # container_image = "123456789012.dkr.ecr.eu-west-1.amazonaws.com/innovatech-cs1-dev-nginx:latest"
+  vpc_id                = module.network.vpc_id
+  public_subnet_ids     = module.network.public_subnet_ids
+  app_subnet_ids        = module.network.app_subnet_ids
+  alb_security_group_id = module.network.alb_security_group_id
+  app_security_group_id = module.network.app_security_group_id
 }
-
-# The database module (2.3 - self-managed MySQL-compatible database on EC2,
-# after RDS was blocked by a Service Control Policy in this sandbox)
 
 module "database" {
   source = "./modules/database"
@@ -36,6 +24,28 @@ module "database" {
   project_name = var.project_name
   environment  = var.environment
 
-  data_subnet_ids       = module.network.data_subnet_ids
+  data_subnet_ids      = module.network.data_subnet_ids
+  db_security_group_id = module.network.db_security_group_id
+}
+
+module "monitoring" {
+  source = "./modules/monitoring"
+
+  project_name = var.project_name
+  environment  = var.environment
+  alert_email  = "560249@student.fontys.nl"
+
+  vpc_id                = module.network.vpc_id
+  app_subnet_ids        = module.network.app_subnet_ids
+  alb_security_group_id = module.network.alb_security_group_id
   db_security_group_id  = module.network.db_security_group_id
+
+  alb_arn                       = module.compute.alb_arn
+  alb_arn_suffix                = module.compute.alb_arn_suffix
+  alb_dns_name                  = module.compute.alb_dns_name
+  nginx_target_group_arn_suffix = module.compute.nginx_target_group_arn_suffix
+  ecs_cluster_name              = module.compute.ecs_cluster_name
+  ecs_service_name              = module.compute.ecs_service_name
+
+  db_private_ip = module.database.db_address
 }

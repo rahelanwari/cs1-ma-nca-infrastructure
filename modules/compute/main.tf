@@ -8,10 +8,6 @@ locals {
   }
 }
 
-# ---------------------------------------------------------------------------
-# ECR repository (for a custom Nginx build, once one exists)
-# ---------------------------------------------------------------------------
-
 resource "aws_ecr_repository" "nginx" {
   name                 = "${local.name_prefix}-nginx"
   image_tag_mutability = "MUTABLE"
@@ -23,20 +19,12 @@ resource "aws_ecr_repository" "nginx" {
   tags = local.common_tags
 }
 
-# ---------------------------------------------------------------------------
-# CloudWatch log group for container logs
-# ---------------------------------------------------------------------------
-
 resource "aws_cloudwatch_log_group" "nginx" {
   name              = "/ecs/${local.name_prefix}-nginx"
   retention_in_days = var.log_retention_days
 
   tags = local.common_tags
 }
-
-# ---------------------------------------------------------------------------
-# IAM roles
-# ---------------------------------------------------------------------------
 
 data "aws_iam_policy_document" "ecs_assume_role" {
   statement {
@@ -50,7 +38,6 @@ data "aws_iam_policy_document" "ecs_assume_role" {
   }
 }
 
-# Execution role: lets ECS pull the image from ECR and write logs to CloudWatch
 resource "aws_iam_role" "ecs_task_execution" {
   name               = "${local.name_prefix}-ecs-execution-role"
   assume_role_policy = data.aws_iam_policy_document.ecs_assume_role.json
@@ -63,19 +50,12 @@ resource "aws_iam_role_policy_attachment" "ecs_task_execution" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
 
-# Task role: permissions the running container itself would need.
-# Empty for now since Nginx doesn't call any AWS APIs directly - attach
-# policies here later if the application needs e.g. S3 or Secrets Manager access.
 resource "aws_iam_role" "ecs_task" {
   name               = "${local.name_prefix}-ecs-task-role"
   assume_role_policy = data.aws_iam_policy_document.ecs_assume_role.json
 
   tags = local.common_tags
 }
-
-# ---------------------------------------------------------------------------
-# ECS cluster
-# ---------------------------------------------------------------------------
 
 resource "aws_ecs_cluster" "main" {
   name = "${local.name_prefix}-cluster"
@@ -87,10 +67,6 @@ resource "aws_ecs_cluster" "main" {
 
   tags = local.common_tags
 }
-
-# ---------------------------------------------------------------------------
-# ECS task definition
-# ---------------------------------------------------------------------------
 
 resource "aws_ecs_task_definition" "nginx" {
   family                   = "${local.name_prefix}-nginx"
@@ -130,10 +106,6 @@ resource "aws_ecs_task_definition" "nginx" {
 
 data "aws_region" "current" {}
 
-# ---------------------------------------------------------------------------
-# Application Load Balancer
-# ---------------------------------------------------------------------------
-
 resource "aws_lb" "main" {
   name               = "${local.name_prefix}-alb"
   internal           = false
@@ -149,7 +121,7 @@ resource "aws_lb_target_group" "nginx" {
   port        = var.container_port
   protocol    = "HTTP"
   vpc_id      = var.vpc_id
-  target_type = "ip" # required for awsvpc network mode on Fargate
+  target_type = "ip"
 
   health_check {
     path                = "/"
@@ -172,15 +144,7 @@ resource "aws_lb_listener" "http" {
     type             = "forward"
     target_group_arn = aws_lb_target_group.nginx.arn
   }
-
-  # Note: for production, add an HTTPS listener (port 443) with an ACM
-  # certificate and redirect this HTTP listener to it. Kept as HTTP-only
-  # here to keep the case-study deployment simple.
 }
-
-# ---------------------------------------------------------------------------
-# ECS service
-# ---------------------------------------------------------------------------
 
 resource "aws_ecs_service" "nginx" {
   name            = "${local.name_prefix}-nginx-service"
@@ -192,17 +156,15 @@ resource "aws_ecs_service" "nginx" {
   network_configuration {
     subnets          = var.app_subnet_ids
     security_groups  = [var.app_security_group_id]
-    assign_public_ip = false # private subnet - only reachable via the ALB
+    assign_public_ip = false
   }
 
   load_balancer {
     target_group_arn = aws_lb_target_group.nginx.arn
-    container_name    = "nginx"
-    container_port    = var.container_port
+    container_name   = "nginx"
+    container_port   = var.container_port
   }
 
-  # Rolling update configuration (Week 1 decision): replace tasks
-  # gradually while keeping the service healthy behind the ALB.
   deployment_minimum_healthy_percent = 100
   deployment_maximum_percent         = 200
 
@@ -210,10 +172,6 @@ resource "aws_ecs_service" "nginx" {
 
   tags = local.common_tags
 }
-
-# ---------------------------------------------------------------------------
-# Auto Scaling (REQ-NCA-P1-04): scale on CPU utilization
-# ---------------------------------------------------------------------------
 
 resource "aws_appautoscaling_target" "ecs" {
   max_capacity       = var.max_capacity
@@ -235,7 +193,7 @@ resource "aws_appautoscaling_policy" "cpu" {
       predefined_metric_type = "ECSServiceAverageCPUUtilization"
     }
     target_value       = var.cpu_target_value
-    scale_in_cooldown  = 300 # wait 5 min before scaling back down (avoid flapping)
-    scale_out_cooldown = 60  # scale up quickly once traffic spikes
+    scale_in_cooldown  = 300
+    scale_out_cooldown = 60
   }
 }
