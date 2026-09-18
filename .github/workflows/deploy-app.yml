@@ -34,12 +34,16 @@ jobs:
           for /f "usebackq tokens=*" %%p in (`aws ecr get-login-password --region %AWS_REGION%`) do (echo %%p| docker login --username AWS --password-stdin %REGISTRY%)
 
       - name: Build Docker image
-        run: docker build -t $env:ECR_REPOSITORY:latest ./app
+        run: |
+          $image = "${env:ECR_REPOSITORY}:latest"
+          docker build -t $image ./app
 
       - name: Tag and push image
         run: |
-          docker tag $env:ECR_REPOSITORY:latest "$env:REGISTRY/$env:ECR_REPOSITORY:latest"
-          docker push "$env:REGISTRY/$env:ECR_REPOSITORY:latest"
+          $localImage = "${env:ECR_REPOSITORY}:latest"
+          $remoteImage = "$env:REGISTRY/${env:ECR_REPOSITORY}:latest"
+          docker tag $localImage $remoteImage
+          docker push $remoteImage
 
       - name: Force new ECS deployment
         run: aws ecs update-service --cluster $env:ECS_CLUSTER --service $env:ECS_SERVICE --force-new-deployment --region $env:AWS_REGION
