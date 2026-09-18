@@ -1,0 +1,45 @@
+﻿name: Deploy Application
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    runs-on: self-hosted
+    defaults:
+      run:
+        shell: powershell
+    env:
+      AWS_REGION: eu-west-1
+      ECR_REPOSITORY: innovatech-cs1-dev-nginx
+      ECS_CLUSTER: innovatech-cs1-dev-cluster
+      ECS_SERVICE: innovatech-cs1-dev-nginx-service
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve ECR registry URL
+        run: |
+          $accountId = (aws sts get-caller-identity --query Account --output text)
+          $registry = "$accountId.dkr.ecr.$env:AWS_REGION.amazonaws.com"
+          echo "REGISTRY=$registry" >> $env:GITHUB_ENV
+
+      - name: Log in to ECR
+        run: |
+          $password = aws ecr get-login-password --region $env:AWS_REGION
+          $password | docker login --username AWS --password-stdin $env:REGISTRY
+
+      - name: Build Docker image
+        run: docker build -t $env:ECR_REPOSITORY:latest ./app
+
+      - name: Tag and push image
+        run: |
+          docker tag $env:ECR_REPOSITORY:latest "$env:REGISTRY/$env:ECR_REPOSITORY:latest"
+          docker push "$env:REGISTRY/$env:ECR_REPOSITORY:latest"
+
+      - name: Force new ECS deployment
+        run: aws ecs update-service --cluster $env:ECS_CLUSTER --service $env:ECS_SERVICE --force-new-deployment --region $env:AWS_REGION
