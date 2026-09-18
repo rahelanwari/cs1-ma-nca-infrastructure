@@ -29,7 +29,9 @@ jobs:
           echo "REGISTRY=$registry" >> $env:GITHUB_ENV
 
       - name: Log in to ECR
-        run: aws ecr get-login-password --region $env:AWS_REGION | docker login --username AWS --password-stdin $env:REGISTRY
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%p in (`aws ecr get-login-password --region %AWS_REGION%`) do (echo %%p| docker login --username AWS --password-stdin %REGISTRY%)
 
       - name: Build Docker image
         run: docker build -t $env:ECR_REPOSITORY:latest ./app
