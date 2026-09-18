@@ -29,9 +29,7 @@ jobs:
           echo "REGISTRY=$registry" >> $env:GITHUB_ENV
 
       - name: Log in to ECR
-        run: |
-          $password = aws ecr get-login-password --region $env:AWS_REGION
-          $password | docker login --username AWS --password-stdin $env:REGISTRY
+        run: aws ecr get-login-password --region $env:AWS_REGION | docker login --username AWS --password-stdin $env:REGISTRY
 
       - name: Build Docker image
         run: docker build -t $env:ECR_REPOSITORY:latest ./app
