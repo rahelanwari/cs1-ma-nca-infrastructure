@@ -1,4 +1,4 @@
-terraform {
+﻿terraform {
   required_version = ">= 1.5.0"
 
   required_providers {
@@ -13,7 +13,7 @@ terraform {
   }
 
   backend "local" {
-    path = "terraform.tfstate"
+    path = "tfstate/innovatech-cs1-dev.tfstate"
   }
 }
 
