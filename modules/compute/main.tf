@@ -1,4 +1,4 @@
-locals {
+﻿locals {
   name_prefix = "${var.project_name}-${var.environment}"
 
   common_tags = {
@@ -80,7 +80,7 @@ resource "aws_ecs_task_definition" "nginx" {
   container_definitions = jsonencode([
     {
       name      = "nginx"
-      image     = var.container_image
+      image     = "${aws_ecr_repository.nginx.repository_url}:latest"
       essential = true
 
       portMappings = [
