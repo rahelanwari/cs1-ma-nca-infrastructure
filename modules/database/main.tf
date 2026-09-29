@@ -19,8 +19,11 @@ data "aws_ami" "amazon_linux" {
   owners      = ["amazon"]
 
   filter {
-    name   = "name"
-    values = ["al2023-ami-*-x86_64"]
+    name = "name"
+    # Standard Amazon Linux 2023 image only. The old pattern "al2023-ami-*"
+    # also matched the "minimal" image, which has no SSM agent - that is why
+    # Session Manager stopped working.
+    values = ["al2023-ami-2023.*-x86_64"]
   }
 }
 
