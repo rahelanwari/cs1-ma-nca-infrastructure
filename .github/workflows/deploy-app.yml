@@ -7,24 +7,92 @@ on:
       - "app/**"
   workflow_dispatch:
 
+# Only one deployment at a time. A new run waits for the running one instead of cancelling it.
+concurrency:
+  group: deploy-app
+  cancel-in-progress: false
+
+# Shared by all jobs (stages)
+env:
+  AWS_REGION: eu-west-1
+  ECR_REPOSITORY: innovatech-cs1-dev-nginx
+  ECS_CLUSTER: innovatech-cs1-dev-cluster
+  ECS_SERVICE: innovatech-cs1-dev-nginx-service
+  IMAGE_TAG: ${{ github.sha }}   # unique tag per commit, so every image can be traced back to a commit
+
+defaults:
+  run:
+    shell: powershell
+
 jobs:
-  build-and-deploy:
+  # ------------------------------------------------------------------
+  # Stage 1: BUILD - turn the code in app/ into a Docker image
+  # ------------------------------------------------------------------
+  build:
+    name: Build
     runs-on: self-hosted
-    defaults:
-      run:
-        shell: powershell
-    env:
-      AWS_REGION: eu-west-1
-      ECR_REPOSITORY: innovatech-cs1-dev-nginx
-      ECS_CLUSTER: innovatech-cs1-dev-cluster
-      ECS_SERVICE: innovatech-cs1-dev-nginx-service
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Build Docker image
+        run: |
+          $image = "${env:ECR_REPOSITORY}:${env:IMAGE_TAG}"
+          docker build -t $image ./app
+          if ($LASTEXITCODE -ne 0) { throw "Docker build failed" }
+          Write-Host "Built image $image"
+
+  # ------------------------------------------------------------------
+  # Stage 2: TEST - start the image locally and check the website works
+  # ------------------------------------------------------------------
+  test:
+    name: Test
+    runs-on: self-hosted
+    needs: build
+    steps:
+      - name: Start test container
+        run: |
+          # Remove a leftover container from an earlier (crashed) run, if there is one
+          $existing = docker ps -aq --filter "name=^app-test$"
+          if ($existing) { docker rm -f app-test | Out-Null }
+
+          docker run -d --name app-test -p 8081:80 "${env:ECR_REPOSITORY}:${env:IMAGE_TAG}"
+          if ($LASTEXITCODE -ne 0) { throw "Could not start the test container" }
+
+      - name: Check that the website responds
+        run: |
+          $ok = $false
+          for ($i = 1; $i -le 10; $i++) {
+            try {
+              $response = Invoke-WebRequest -Uri "http://localhost:8081" -UseBasicParsing -TimeoutSec 5
+              if ($response.StatusCode -eq 200 -and $response.Content -match "Innovatech Solutions") {
+                $ok = $true
+                break
+              }
+            } catch { }
+            Start-Sleep -Seconds 2
+          }
+          if (-not $ok) { throw "Test failed: the page did not return HTTP 200 with the expected content" }
+          Write-Host "Test passed: HTTP 200 and expected content found"
+
+      - name: Remove test container
+        if: always()   # also clean up when the test failed
+        run: |
+          $existing = docker ps -aq --filter "name=^app-test$"
+          if ($existing) { docker rm -f app-test | Out-Null }
+
+  # ------------------------------------------------------------------
+  # Stage 3: PUSH - store the tested image in Amazon ECR
+  # ------------------------------------------------------------------
+  push:
+    name: Push to ECR
+    runs-on: self-hosted
+    needs: test
+    steps:
       - name: Resolve ECR registry URL
         run: |
           $accountId = (aws sts get-caller-identity --query Account --output text)
+          if ($LASTEXITCODE -ne 0) { throw "AWS credentials are missing or expired" }
           $registry = "$accountId.dkr.ecr.$env:AWS_REGION.amazonaws.com"
           echo "REGISTRY=$registry" >> $env:GITHUB_ENV
 
@@ -33,17 +101,36 @@ jobs:
         run: |
           for /f "usebackq tokens=*" %%p in (`aws ecr get-login-password --region %AWS_REGION%`) do (echo %%p| docker login --username AWS --password-stdin %REGISTRY%)
 
-      - name: Build Docker image
-        run: |
-          $image = "${env:ECR_REPOSITORY}:latest"
-          docker build -t $image ./app
-
       - name: Tag and push image
         run: |
-          $localImage = "${env:ECR_REPOSITORY}:latest"
-          $remoteImage = "$env:REGISTRY/${env:ECR_REPOSITORY}:latest"
-          docker tag $localImage $remoteImage
-          docker push $remoteImage
+          $localImage   = "${env:ECR_REPOSITORY}:${env:IMAGE_TAG}"
+          $remoteSha    = "$env:REGISTRY/${env:ECR_REPOSITORY}:${env:IMAGE_TAG}"
+          $remoteLatest = "$env:REGISTRY/${env:ECR_REPOSITORY}:latest"
 
+          docker tag $localImage $remoteSha
+          docker tag $localImage $remoteLatest
+
+          docker push $remoteSha
+          if ($LASTEXITCODE -ne 0) { throw "Push of $remoteSha failed" }
+          docker push $remoteLatest
+          if ($LASTEXITCODE -ne 0) { throw "Push of the latest tag failed" }
+
+  # ------------------------------------------------------------------
+  # Stage 4: DEPLOY - roll out the new image to the Fargate tasks
+  # ------------------------------------------------------------------
+  deploy:
+    name: Deploy to ECS
+    runs-on: self-hosted
+    needs: push
+    environment: dev   # shows up under Deployments in GitHub (deployment tracking)
+    steps:
       - name: Force new ECS deployment
-        run: aws ecs update-service --cluster $env:ECS_CLUSTER --service $env:ECS_SERVICE --force-new-deployment --region $env:AWS_REGION
+        run: |
+          aws ecs update-service --cluster $env:ECS_CLUSTER --service $env:ECS_SERVICE --force-new-deployment --region $env:AWS_REGION | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "ECS update-service failed" }
+
+      - name: Wait until the service is stable
+        run: |
+          aws ecs wait services-stable --cluster $env:ECS_CLUSTER --services $env:ECS_SERVICE --region $env:AWS_REGION
+          if ($LASTEXITCODE -ne 0) { throw "The service did not become stable - check the ECS service events" }
+          Write-Host "Deployment of $env:IMAGE_TAG finished: new tasks are running and healthy"
