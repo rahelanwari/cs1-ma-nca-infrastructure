@@ -104,6 +104,12 @@ resource "aws_instance" "mysql" {
   tags = merge(local.common_tags, {
     Name = "${local.name_prefix}-mysql"
   })
+
+  # Don't replace the database just because AWS released a newer AMI.
+  # The AMI is only used when the instance is first created.
+  lifecycle {
+    ignore_changes = [ami]
+  }
 }
 
 resource "aws_secretsmanager_secret" "db_credentials" {

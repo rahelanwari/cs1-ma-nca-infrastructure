@@ -12,8 +12,10 @@ terraform {
     }
   }
 
+  # Absolute path, so the laptop and the pipeline runner use the SAME state file.
+  # A relative path resolves differently depending on the folder Terraform runs in.
   backend "local" {
-    path = "tfstate/innovatech-cs1-dev.tfstate"
+    path = "C:/tfstate/innovatech-cs1-dev.tfstate"
   }
 }
 
