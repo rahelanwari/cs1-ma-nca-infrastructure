@@ -1,5 +1,23 @@
-﻿name: Deploy Infrastructure
+﻿# =====================================================================
+# DEPLOY INFRASTRUCTURE PIPELINE
+# ---------------------------------------------------------------------
+# Purpose: every change to the Terraform code is first checked, then
+# planned, and only applied to AWS after a human has approved the plan.
+#
+# Stages:   Validate  ->  Plan  ->  Apply (after approval)
+#
+# Each stage is a separate JOB. A job only starts when the job it
+# "needs" has succeeded. If a stage fails, the next stages are skipped,
+# and GitHub shows exactly WHICH stage failed.
+# =====================================================================
 
+name: Deploy Infrastructure
+
+# ---------------------------------------------------------------------
+# WHEN does this pipeline run?
+# - push to main, but only if a .tf file changed (path filter)
+# - or manually via Actions -> Deploy Infrastructure -> Run workflow
+# ---------------------------------------------------------------------
 on:
   push:
     branches: [main]
@@ -7,21 +25,141 @@ on:
       - "**.tf"
   workflow_dispatch:
 
+# ---------------------------------------------------------------------
+# Never run two infrastructure pipelines at the same time.
+# Two Terraform runs changing the same state file at once can corrupt it.
+# cancel-in-progress: false -> a new run WAITS, it does not stop the
+# running one halfway through an apply.
+# ---------------------------------------------------------------------
+concurrency:
+  group: deploy-infra
+  cancel-in-progress: false
+
+# All run-steps in all jobs use PowerShell (our runner is a Windows laptop)
+defaults:
+  run:
+    shell: powershell
+
 jobs:
-  terraform:
+
+  # ===================================================================
+  # STAGE 1: VALIDATE
+  # Goal: catch mistakes in the code BEFORE we talk to AWS at all.
+  # ===================================================================
+  validate:
+    name: Validate
+    runs-on: self-hosted          # runs on the runner on my laptop
+    steps:
+      # Get the code from the repository into the runner's work folder.
+      # Note: checkout also CLEANS the folder, so nothing from earlier
+      # runs or jobs is left over (that's why every job does this again).
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Check the formatting. -check only REPORTS badly formatted files,
+      # it does not change them. If this fails: run `terraform fmt -recursive`
+      # locally, commit and push again.
+      - name: Terraform format check
+        run: terraform fmt -check -recursive
+
+      # Download the AWS provider so Terraform understands the code.
+      # -backend=false: don't connect to the state file, we only want to
+      # check the code here, not look at the real infrastructure.
+      - name: Terraform Init (without backend)
+        run: terraform init -backend=false -input=false
+
+      # Check the code for errors: wrong variable names, missing
+      # arguments, references to resources that don't exist, etc.
+      - name: Terraform Validate
+        run: terraform validate
+
+  # ===================================================================
+  # STAGE 2: PLAN
+  # Goal: calculate WHAT would change in AWS, without changing anything,
+  # and save that plan so the Apply stage can use exactly this plan.
+  # ===================================================================
+  plan:
+    name: Plan
     runs-on: self-hosted
-    defaults:
-      run:
-        shell: powershell
+    needs: validate               # only runs if Validate succeeded
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Normal init, this time WITH the backend, because the plan has to
+      # compare the code with the real state (C:/tfstate/...tfstate).
+      # The state file is outside the repo folder, so checkout doesn't
+      # delete it. This only works because all jobs run on the same laptop.
+      - name: Terraform Init
+        run: terraform init -input=false
+
+      # Make the plan and save it to a file called "tfplan".
+      # -input=false: never wait for keyboard input (nobody is typing).
+      - name: Terraform Plan
+        run: terraform plan -input=false -out=tfplan
+
+      # Show the plan in readable text on the summary page of the run,
+      # so the reviewer can read WHAT will change before approving.
+      - name: Show plan in run summary
+        run: |
+          "## Terraform plan" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          '```' | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          terraform show -no-color tfplan | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          '```' | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      # Jobs don't share files. The next job starts with a cleaned
+      # folder, so "tfplan" would be gone. We upload it as an ARTIFACT
+      # (a file stored by GitHub for this run) so Apply can download it.
+      # retention-days: 1 -> deleted after 1 day, because the plan file
+      # can contain sensitive values (e.g. the generated DB password).
+      - name: Upload plan file
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan
+          path: tfplan
+          retention-days: 1
+
+  # ===================================================================
+  # STAGE 3: APPLY
+  # Goal: apply exactly the plan that was reviewed - nothing else.
+  # ===================================================================
+  apply:
+    name: Apply
+    runs-on: self-hosted
+    needs: plan                   # only runs if Plan succeeded
+
+    # APPROVAL: this job belongs to the environment "infra-approval".
+    # In GitHub: Settings -> Environments -> infra-approval ->
+    # "Required reviewers" -> add yourself. GitHub then PAUSES the run
+    # here until you read the plan and click "Approve".
+    # (Required reviewers on a private repo need GitHub Pro, which is
+    # free with the GitHub Student Developer Pack.)
+    environment: infra-approval
+
+    # NO GitHub Pro? Remove the "environment" line above and use this
+    # line instead. Then a push only runs Validate + Plan, and Apply only
+    # runs when you start the workflow manually ("Run workflow").
+    # if: github.event_name == 'workflow_dispatch'
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Terraform Init
-        run: terraform init
+        run: terraform init -input=false
 
-      - name: Terraform Plan
-        run: terraform plan -out=tfplan
+      # Get the "tfplan" file that the Plan stage uploaded.
+      - name: Download plan file
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan
 
+      # Apply the SAVED plan. No -auto-approve is needed: when you give
+      # Terraform a plan file, the plan was already made and approved.
+      # Safety: if the infrastructure changed after the plan was made,
+      # Terraform refuses with "Saved plan is stale" instead of doing
+      # something nobody reviewed.
+      # Tip: if you wait long before approving, your temporary AWS
+      # credentials on the runner can expire -> refresh them first.
       - name: Terraform Apply
-        run: terraform apply -auto-approve tfplan
+        run: terraform apply -input=false tfplan
