@@ -2,13 +2,19 @@
 # DEPLOY INFRASTRUCTURE PIPELINE
 # ---------------------------------------------------------------------
 # Purpose: every change to the Terraform code is first checked, then
-# planned, and only applied to AWS after a human has approved the plan.
+# planned, and only applied to AWS after a human has reviewed the plan.
 #
-# Stages:   Validate  ->  Plan  ->  Apply (after approval)
+# Stages:   Validate  ->  Plan  ->  Apply (only when started manually)
 #
 # Each stage is a separate JOB. A job only starts when the job it
 # "needs" has succeeded. If a stage fails, the next stages are skipped,
 # and GitHub shows exactly WHICH stage failed.
+#
+# How to use:
+# 1. Push a .tf change -> Validate + Plan run, Apply is skipped.
+# 2. Read the plan on the run's Summary page.
+# 3. If the plan is correct: Actions -> Deploy Infrastructure ->
+#    Run workflow. That run does Validate + Plan + Apply.
 # =====================================================================
 
 name: Deploy Infrastructure
@@ -50,11 +56,29 @@ jobs:
     name: Validate
     runs-on: self-hosted          # runs on the runner on my laptop
     steps:
+      # Git for Windows can convert line endings to Windows-style (CRLF)
+      # when it checks out files. Terraform then sees the user_data script
+      # and the Prometheus config as "changed" text compared to what was
+      # applied from the laptop (LF). This setting turns that conversion off.
+      - name: Use LF line endings on checkout
+        run: git config --global core.autocrlf false
+
       # Get the code from the repository into the runner's work folder.
       # Note: checkout also CLEANS the folder, so nothing from earlier
       # runs or jobs is left over (that's why every job does this again).
       - name: Checkout
         uses: actions/checkout@v4
+
+      # Safety check: stop the pipeline if any .tf file still has CRLF
+      # line endings, instead of silently planning unwanted changes.
+      - name: Check line endings (LF only)
+        run: |
+          $crlf = Get-ChildItem -Recurse -Include *.tf -File | Where-Object { (Get-Content -Raw $_.FullName) -match "`r`n" }
+          if ($crlf) {
+            $crlf | ForEach-Object { Write-Host $_.FullName }
+            throw "Files with Windows (CRLF) line endings found"
+          }
+          Write-Host "All .tf files use LF line endings"
 
       # Check the formatting. -check only REPORTS badly formatted files,
       # it does not change them. If this fails: run `terraform fmt -recursive`
@@ -83,6 +107,9 @@ jobs:
     runs-on: self-hosted
     needs: validate               # only runs if Validate succeeded
     steps:
+      - name: Use LF line endings on checkout
+        run: git config --global core.autocrlf false
+
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -99,7 +126,7 @@ jobs:
         run: terraform plan -input=false -out=tfplan
 
       # Show the plan in readable text on the summary page of the run,
-      # so the reviewer can read WHAT will change before approving.
+      # so the reviewer can read WHAT will change before applying.
       - name: Show plan in run summary
         run: |
           "## Terraform plan" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
@@ -121,27 +148,26 @@ jobs:
 
   # ===================================================================
   # STAGE 3: APPLY
-  # Goal: apply exactly the plan that was reviewed - nothing else.
+  # Goal: apply exactly the plan made in the Plan stage - nothing else.
   # ===================================================================
   apply:
     name: Apply
     runs-on: self-hosted
     needs: plan                   # only runs if Plan succeeded
 
-    # APPROVAL: this job belongs to the environment "infra-approval".
-    # In GitHub: Settings -> Environments -> infra-approval ->
-    # "Required reviewers" -> add yourself. GitHub then PAUSES the run
-    # here until you read the plan and click "Approve".
-    # (Required reviewers on a private repo need GitHub Pro, which is
-    # free with the GitHub Student Developer Pack.)
-    environment: infra-approval
-
-    # NO GitHub Pro? Remove the "environment" line above and use this
-    # line instead. Then a push only runs Validate + Plan, and Apply only
-    # runs when you start the workflow manually ("Run workflow").
-    # if: github.event_name == 'workflow_dispatch'
+    # APPROVAL: "Required reviewers" (GitHub pauses the run until someone
+    # clicks Approve) is not available on a private repo without GitHub Pro.
+    # Instead, Apply only runs when the workflow is started MANUALLY
+    # ("Run workflow"). A push only runs Validate + Plan, so the plan can
+    # be reviewed first. With GitHub Pro (free via the Student Developer
+    # Pack), switch back to: environment: infra-approval
+    # environment: infra-approval
+    if: github.event_name == 'workflow_dispatch'
 
     steps:
+      - name: Use LF line endings on checkout
+        run: git config --global core.autocrlf false
+
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -155,11 +181,9 @@ jobs:
           name: tfplan
 
       # Apply the SAVED plan. No -auto-approve is needed: when you give
-      # Terraform a plan file, the plan was already made and approved.
+      # Terraform a plan file, the plan was already made.
       # Safety: if the infrastructure changed after the plan was made,
       # Terraform refuses with "Saved plan is stale" instead of doing
       # something nobody reviewed.
-      # Tip: if you wait long before approving, your temporary AWS
-      # credentials on the runner can expire -> refresh them first.
       - name: Terraform Apply
         run: terraform apply -input=false tfplan

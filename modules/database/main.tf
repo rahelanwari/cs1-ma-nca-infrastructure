@@ -105,10 +105,12 @@ resource "aws_instance" "mysql" {
     Name = "${local.name_prefix}-mysql"
   })
 
-  # Don't replace the database just because AWS released a newer AMI.
-  # The AMI is only used when the instance is first created.
+  # The AMI and the user_data script are only used when the instance is
+  # first created (user_data only runs on the first boot). Changes to them
+  # afterwards - a newer AMI from AWS, or different line endings in the
+  # script - should not stop, restart or replace the database.
   lifecycle {
-    ignore_changes = [ami]
+    ignore_changes = [ami, user_data]
   }
 }
 
