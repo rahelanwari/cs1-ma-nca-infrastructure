@@ -10,6 +10,50 @@ locals {
 
 data "aws_region" "current" {}
 
+# -------------------------------------------------------------------
+# Grafana provisioning (data sources + dashboard as code).
+# Grafana reads these files at every start, so a new monitoring task
+# always comes up with the same data sources and the same dashboard.
+# -------------------------------------------------------------------
+locals {
+  # Data sources with a FIXED uid, so the dashboard JSON can refer to them
+  grafana_datasources = <<-YAML
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        uid: prometheus
+        access: proxy
+        url: http://localhost:9090
+        isDefault: true
+      - name: CloudWatch
+        type: cloudwatch
+        uid: cloudwatch
+        jsonData:
+          authType: default
+          defaultRegion: ${data.aws_region.current.name}
+  YAML
+
+  # Tells Grafana to load every dashboard JSON file from this folder
+  grafana_dashboard_provider = <<-YAML
+    apiVersion: 1
+    providers:
+      - name: innovatech
+        type: file
+        disableDeletion: true
+        options:
+          path: /etc/grafana/provisioning/dashboards
+  YAML
+
+  # The dashboard itself, with the real ALB / target group / ECS names filled in
+  grafana_dashboard_json = templatefile("${path.module}/dashboards/innovatech.json.tftpl", {
+    alb_arn_suffix          = var.alb_arn_suffix
+    target_group_arn_suffix = var.nginx_target_group_arn_suffix
+    ecs_cluster_name        = var.ecs_cluster_name
+    ecs_service_name        = var.ecs_service_name
+  })
+}
+
 resource "aws_sns_topic" "alerts" {
   name = "${local.name_prefix}-alerts"
   tags = local.common_tags
@@ -261,6 +305,17 @@ resource "aws_ecs_task_definition" "monitoring" {
       image        = "grafana/grafana:latest"
       essential    = true
       portMappings = [{ containerPort = var.grafana_port, protocol = "tcp" }]
+      entryPoint   = ["sh", "-c"]
+      command = [
+        <<-EOT
+        # Write the provisioning files first, then start Grafana as normal (/run.sh)
+        mkdir -p /etc/grafana/provisioning/datasources /etc/grafana/provisioning/dashboards
+        echo '${base64encode(local.grafana_datasources)}' | base64 -d > /etc/grafana/provisioning/datasources/datasources.yaml
+        echo '${base64encode(local.grafana_dashboard_provider)}' | base64 -d > /etc/grafana/provisioning/dashboards/provider.yaml
+        echo '${base64encode(local.grafana_dashboard_json)}' | base64 -d > /etc/grafana/provisioning/dashboards/innovatech.json
+        exec /run.sh
+        EOT
+      ]
       environment = [
         { name = "GF_SECURITY_ADMIN_USER", value = "admin" },
         { name = "GF_SECURITY_ADMIN_PASSWORD", value = random_password.grafana_admin.result },
