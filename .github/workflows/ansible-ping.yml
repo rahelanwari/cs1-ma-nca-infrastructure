@@ -1,0 +1,22 @@
+# =====================================================================
+# ANSIBLE CONNECTIVITY CHECK
+# Runs on the Linux runner in NetLab (mgmt01) and checks that Ansible
+# can reach every on-prem host (ws01, mgmt01, fw01).
+# Start: Actions -> Ansible ping -> Run workflow
+# =====================================================================
+name: Ansible ping
+
+on:
+  workflow_dispatch:
+
+jobs:
+  ping:
+    name: Ping all hosts
+    runs-on: [self-hosted, Linux]   # the runner on mgmt01
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Ansible ping
+        working-directory: ansible
+        run: ansible all -m ping
