@@ -30,7 +30,7 @@ jobs:
   # ------------------------------------------------------------------
   build:
     name: Build
-    runs-on: self-hosted
+    runs-on: [self-hosted, Windows]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -47,7 +47,7 @@ jobs:
   # ------------------------------------------------------------------
   test:
     name: Test
-    runs-on: self-hosted
+    runs-on: [self-hosted, Windows]
     needs: build
     steps:
       - name: Start test container
@@ -86,7 +86,7 @@ jobs:
   # ------------------------------------------------------------------
   push:
     name: Push to ECR
-    runs-on: self-hosted
+    runs-on: [self-hosted, Windows]
     needs: test
     steps:
       - name: Resolve ECR registry URL
@@ -120,7 +120,7 @@ jobs:
   # ------------------------------------------------------------------
   deploy:
     name: Deploy to ECS
-    runs-on: self-hosted
+    runs-on: [self-hosted, Windows]
     needs: push
     environment: dev   # shows up under Deployments in GitHub (deployment tracking)
     steps:

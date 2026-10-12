@@ -11,7 +11,8 @@
 # and GitHub shows exactly WHICH stage failed.
 #
 # How to use:
-# 1. Push a .tf change -> Validate + Plan run, Apply is skipped.
+# 1. Push a .tf change (or a change in modules/) -> Validate + Plan run,
+#    Apply is skipped.
 # 2. Read the plan on the run's Summary page.
 # 3. If the plan is correct: Actions -> Deploy Infrastructure ->
 #    Run workflow. That run does Validate + Plan + Apply.
@@ -21,7 +22,8 @@ name: Deploy Infrastructure
 
 # ---------------------------------------------------------------------
 # WHEN does this pipeline run?
-# - push to main, but only if a .tf file changed (path filter)
+# - push to main, but only if a .tf file or a file in modules/ changed
+#   (path filter; modules/ also covers the dashboard .tftpl files)
 # - or manually via Actions -> Deploy Infrastructure -> Run workflow
 # ---------------------------------------------------------------------
 on:
@@ -29,6 +31,7 @@ on:
     branches: [main]
     paths:
       - "**.tf"
+      - "modules/**"
   workflow_dispatch:
 
 # ---------------------------------------------------------------------
@@ -54,7 +57,7 @@ jobs:
   # ===================================================================
   validate:
     name: Validate
-    runs-on: self-hosted          # runs on the runner on my laptop
+    runs-on: [self-hosted, Windows]   # runs on the runner on my laptop
     steps:
       # Git for Windows can convert line endings to Windows-style (CRLF)
       # when it checks out files. Terraform then sees the user_data script
@@ -104,7 +107,7 @@ jobs:
   # ===================================================================
   plan:
     name: Plan
-    runs-on: self-hosted
+    runs-on: [self-hosted, Windows]
     needs: validate               # only runs if Validate succeeded
     steps:
       - name: Use LF line endings on checkout
@@ -152,7 +155,7 @@ jobs:
   # ===================================================================
   apply:
     name: Apply
-    runs-on: self-hosted
+    runs-on: [self-hosted, Windows]
     needs: plan                   # only runs if Plan succeeded
 
     # APPROVAL: "Required reviewers" (GitHub pauses the run until someone

@@ -3,7 +3,8 @@
 Terraform configuration for Case Study 1 (Innovatech Solutions): a scalable
 web environment on AWS, built as part of the CS1-MA-NCA case study (HBO ICT,
 Fontys). Deployed and managed entirely through Terraform — no manual console
-changes.
+changes. Case Study 2 (CS2-MA-NCA) extends this environment into a hybrid
+cloud with an on-prem environment and a SOAR system (see below).
 
 ## Architecture
 
@@ -19,19 +20,36 @@ changes.
   Policy in the AWS Innovation Sandbox used for this case study. IT staff
   access is provided via AWS Systems Manager Session Manager — no SSH key,
   no open inbound port, IAM-authenticated and fully logged.
+- **Monitoring** — Prometheus + Grafana on ECS Fargate. Data sources and
+  the dashboard are provisioned as code, so a replaced task comes back
+  the same. CloudWatch alarms send e-mail via SNS.
+- **CI/CD** — GitHub Actions on a self-hosted runner: an app pipeline
+  (Build → Test → Push → Deploy) and an infra pipeline
+  (Validate → Plan → Apply, Apply only when started manually).
 
 ## Repository structure
 
 ```
 .
-├── main.tf            # Root module: wires network, compute, and database together
-├── providers.tf        # AWS + random provider configuration
-├── variables.tf         # Root-level variables (region, project name, environment)
-├── outputs.tf            # Re-exposed outputs (ALB URL, DB endpoint, etc.)
-└── modules/
-    ├── network/           # VPC, subnets, NAT Gateway, route tables, security groups
-    ├── compute/            # ECR, ECS cluster/service/task definition, ALB, Auto Scaling
-    └── database/            # EC2 + MariaDB, Secrets Manager, SSM access for IT staff
+├── .github/workflows/
+│   ├── deploy-app.yml      # Build → Test → Push → Deploy (changes in app/)
+│   └── deploy-infra.yml    # Validate → Plan → Apply (changes in .tf / modules/)
+├── app/                    # Dockerfile + website (Nginx)
+├── main.tf                 # Root module: wires the modules together
+├── providers.tf            # AWS + random provider configuration, state location
+├── variables.tf            # Root-level variables (region, project name, environment)
+├── outputs.tf              # Re-exposed outputs (ALB URL, Grafana URL, etc.)
+├── modules/
+│   ├── network/            # VPC, subnets, NAT Gateway, route tables, security groups
+│   ├── compute/            # ECR, ECS cluster/service/task definition, ALB, Auto Scaling
+│   ├── database/           # EC2 + MariaDB, Secrets Manager, SSM access for IT staff
+│   ├── monitoring/         # Prometheus, Grafana (dashboard as code), alarms, SNS
+│   ├── vpn/                # CS2: Site-to-Site VPN to NetLab
+│   ├── dns/                # CS2: Route 53 private hosted zone
+│   └── soar/               # CS2: SOAR platform (ECS service, S3, SNS, IAM)
+├── soar/                   # CS2: Python SOAR service code and tests
+├── ansible/                # CS2: configuration of NetLab VMs and OS updates
+└── docs/                   # CS2: build steps for NetLab VMs and pfSense
 ```
 
 ## Prerequisites
@@ -68,7 +86,21 @@ sandbox budget.
   RDS/EC2 design didn't yet provide a route for. Implemented via an IAM
   role + instance profile granting Session Manager access.
 
+## Case Study 2 (hybrid cloud, SOAR)
+
+Case Study 2 extends this environment with Fontys NetLab (on-prem):
+
+- `modules/vpn/` – Site-to-Site VPN between NetLab and the VPC
+- `modules/dns/` – Route 53 private hosted zone `innovatech.internal`
+- `modules/soar/`, `soar/` – the Python SOAR service
+- `ansible/` – configuration of the NetLab VMs and OS updates
+- `docs/` – build steps for the NetLab VMs and pfSense
+
+Pipelines run on two self-hosted runners: the laptop (label `Windows`,
+AWS pipelines) and mgmt01 in NetLab (label `Linux`, Ansible pipelines).
+
 ## Status
 
-- ✅ Phase 2 (Network, Compute, Database) — deployed and verified
-- ⏳ Phase 3 (Monitoring, CI/CD) — in progress
+- ✅ Case Study 1 – all phases done (network, compute, database,
+  monitoring, CI/CD, testing)
+- ⏳ Case Study 2 – Phase 1 (design) done, Phase 2 in progress

@@ -5,6 +5,10 @@
 *.tfstate
 *.tfstate.*
 
+# Terraform plan files - can also contain sensitive values
+tfplan
+*.tfplan
+
 # Crash log files
 crash.log
 crash.*.log
@@ -22,6 +26,25 @@ override.tf.json
 # Ignore CLI configuration files
 .terraformrc
 terraform.rc
+
+# Local tools (load test tools like hey.exe and bombardier.exe)
+*.exe
+
+# Private keys - never in Git
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+
+# Ansible
+*.retry
+
+# Python (SOAR option A)
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.env
 
 # OS/editor noise
 .DS_Store
