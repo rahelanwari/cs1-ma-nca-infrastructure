@@ -15,3 +15,9 @@ variable "environment" {
   type        = string
   default     = "dev"
 }
+
+variable "netlab_public_ip" {
+  description = "Public IP address that Fontys NetLab (fw01) uses on the internet"
+  type        = string
+  default     = "145.220.75.5"
+}

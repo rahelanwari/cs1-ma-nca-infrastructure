@@ -32,3 +32,8 @@ output "db_security_group_id" {
   description = "Security group ID for the data tier (RDS)"
   value       = aws_security_group.db.id
 }
+
+output "private_route_table_id" {
+  description = "ID of the private route table (app and data subnets)"
+  value       = aws_route_table.private.id
+}

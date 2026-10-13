@@ -67,3 +67,25 @@ output "sns_topic_arn" {
   description = "SNS topic ARN that CloudWatch alarms notify"
   value       = module.monitoring.sns_topic_arn
 }
+
+output "vpn_tunnel1_address" {
+  description = "Public IP of AWS VPN tunnel 1"
+  value       = module.vpn.tunnel1_address
+}
+
+output "vpn_tunnel2_address" {
+  description = "Public IP of AWS VPN tunnel 2"
+  value       = module.vpn.tunnel2_address
+}
+
+output "vpn_tunnel1_preshared_key" {
+  description = "Pre-shared key of VPN tunnel 1 (sensitive)"
+  value       = module.vpn.tunnel1_preshared_key
+  sensitive   = true
+}
+
+output "vpn_tunnel2_preshared_key" {
+  description = "Pre-shared key of VPN tunnel 2 (sensitive)"
+  value       = module.vpn.tunnel2_preshared_key
+  sensitive   = true
+}

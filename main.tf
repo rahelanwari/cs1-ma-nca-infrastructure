@@ -49,3 +49,15 @@ module "monitoring" {
 
   db_private_ip = module.database.db_address
 }
+
+module "vpn" {
+  source = "./modules/vpn"
+
+  project_name = var.project_name
+  environment  = var.environment
+
+  vpc_id                 = module.network.vpc_id
+  private_route_table_id = module.network.private_route_table_id
+  db_security_group_id   = module.network.db_security_group_id
+  customer_gateway_ip    = var.netlab_public_ip
+}
