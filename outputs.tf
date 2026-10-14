@@ -89,3 +89,13 @@ output "vpn_tunnel2_preshared_key" {
   value       = module.vpn.tunnel2_preshared_key
   sensitive   = true
 }
+
+output "dns_zone_name" {
+  description = "Private DNS zone of the VPC"
+  value       = module.dns.zone_name
+}
+
+output "db_fqdn" {
+  description = "Private DNS name of the database server"
+  value       = module.dns.db_fqdn
+}

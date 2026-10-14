@@ -61,3 +61,13 @@ module "vpn" {
   db_security_group_id   = module.network.db_security_group_id
   customer_gateway_ip    = var.netlab_public_ip
 }
+
+module "dns" {
+  source = "./modules/dns"
+
+  project_name = var.project_name
+  environment  = var.environment
+
+  vpc_id        = module.network.vpc_id
+  db_private_ip = module.database.db_address
+}
