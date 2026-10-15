@@ -41,3 +41,15 @@ variable "onprem_mgmt_cidr" {
   type        = string
   default     = "192.168.20.0/24"
 }
+
+variable "tunnel1_preshared_key" {
+  description = "Fixed pre-shared key of tunnel 1 (GitHub secret), so pfSense keeps working after a destroy and apply"
+  type        = string
+  sensitive   = true
+}
+
+variable "tunnel2_preshared_key" {
+  description = "Fixed pre-shared key of tunnel 2 (GitHub secret)"
+  type        = string
+  sensitive   = true
+}

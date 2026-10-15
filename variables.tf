@@ -21,3 +21,15 @@ variable "netlab_public_ip" {
   type        = string
   default     = "145.220.75.5"
 }
+
+variable "vpn_tunnel1_psk" {
+  description = "Pre-shared key of VPN tunnel 1 (from the GitHub secret VPN_TUNNEL1_PSK)"
+  type        = string
+  sensitive   = true
+}
+
+variable "vpn_tunnel2_psk" {
+  description = "Pre-shared key of VPN tunnel 2 (from the GitHub secret VPN_TUNNEL2_PSK)"
+  type        = string
+  sensitive   = true
+}

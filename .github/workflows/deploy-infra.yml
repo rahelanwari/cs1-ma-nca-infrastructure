@@ -48,6 +48,11 @@ concurrency:
 defaults:
   run:
     shell: powershell
+    
+# The VPN pre-shared keys come from GitHub secrets, never from the code
+env:
+  TF_VAR_vpn_tunnel1_psk: ${{ secrets.VPN_TUNNEL1_PSK }}
+  TF_VAR_vpn_tunnel2_psk: ${{ secrets.VPN_TUNNEL2_PSK }}
 
 jobs:
 
