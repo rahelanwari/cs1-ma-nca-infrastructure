@@ -57,6 +57,11 @@ locals {
     ecs_cluster_name        = var.ecs_cluster_name
     ecs_service_name        = var.ecs_service_name
   })
+
+  # Alert rules R1-R5 (CS2), with the real VPN id filled in
+  grafana_alert_rules = templatefile("${path.module}/alerting/rules.yaml.tftpl", {
+    vpn_connection_id = var.vpn_connection_id
+  })
 }
 
 resource "aws_sns_topic" "alerts" {
@@ -314,10 +319,11 @@ resource "aws_ecs_task_definition" "monitoring" {
       command = [
         <<-EOT
         # Write the provisioning files first, then start Grafana as normal (/run.sh)
-        mkdir -p /etc/grafana/provisioning/datasources /etc/grafana/provisioning/dashboards
+        mkdir -p /etc/grafana/provisioning/datasources /etc/grafana/provisioning/dashboards /etc/grafana/provisioning/alerting
         echo '${base64encode(local.grafana_datasources)}' | base64 -d > /etc/grafana/provisioning/datasources/datasources.yaml
         echo '${base64encode(local.grafana_dashboard_provider)}' | base64 -d > /etc/grafana/provisioning/dashboards/provider.yaml
         echo '${base64encode(local.grafana_dashboard_json)}' | base64 -d > /etc/grafana/provisioning/dashboards/innovatech.json
+        echo '${base64encode(local.grafana_alert_rules)}' | base64 -d > /etc/grafana/provisioning/alerting/rules.yaml
         exec /run.sh
         EOT
       ]

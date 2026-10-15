@@ -97,3 +97,8 @@ variable "loki_url" {
   type        = string
   default     = "http://loki.innovatech.internal:3100"
 }
+
+variable "vpn_connection_id" {
+  description = "ID of the Site-to-Site VPN connection (used by alert rule R4)"
+  type        = string
+}

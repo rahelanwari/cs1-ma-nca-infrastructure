@@ -48,6 +48,8 @@ module "monitoring" {
   ecs_service_name              = module.compute.ecs_service_name
 
   db_private_ip = module.database.db_address
+
+  vpn_connection_id = module.vpn.vpn_connection_id
 }
 
 module "vpn" {

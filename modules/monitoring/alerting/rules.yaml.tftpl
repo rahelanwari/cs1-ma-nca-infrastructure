@@ -1,0 +1,185 @@
+# Grafana alert rules R1-R5 (CS2 block 5), loaded at every start of Grafana.
+# Every alert has the labels type, severity, source and host; the SOAR uses them (block 6).
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: security-and-availability
+    folder: Innovatech Alerts
+    interval: 1m
+    rules:
+      # R1 - one or more failed SSH logins on ws01 in 5 minutes
+      - uid: r1-ssh-failed-login
+        title: R1 Failed SSH login
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 300, to: 0 }
+            datasourceUid: loki
+            model:
+              refId: A
+              editorMode: code
+              queryType: instant
+              expr: 'sum by (host) (count_over_time({job="auth"} |= "Failed password" [5m]))'
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0] }
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          summary: 'Failed SSH login(s) on {{ $labels.host }} in the last 5 minutes'
+        labels:
+          type: ssh_failed_login
+          severity: low
+          source: onprem
+          host: '{{ $labels.host }}'
+
+      # R2 - 5 or more failed SSH logins from one IP address in 5 minutes
+      - uid: r2-ssh-brute-force
+        title: R2 SSH brute force
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 300, to: 0 }
+            datasourceUid: loki
+            model:
+              refId: A
+              editorMode: code
+              queryType: instant
+              expr: 'sum by (host, src_ip) (count_over_time({job="auth"} |= "Failed password" | regexp `from (?P<src_ip>\S+) port` [5m]))'
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [4] }
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          summary: '5 or more failed SSH logins on {{ $labels.host }} from {{ $labels.src_ip }} in 5 minutes'
+        labels:
+          type: ssh_brute_force
+          severity: medium
+          source: onprem
+          host: '{{ $labels.host }}'
+          src_ip: '{{ $labels.src_ip }}'
+
+      # R3 - 50 or more blocked connections from one source in 1 minute (fw01)
+      - uid: r3-port-scan
+        title: R3 Port scan
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 60, to: 0 }
+            datasourceUid: loki
+            model:
+              refId: A
+              editorMode: code
+              queryType: instant
+              expr: 'sum by (host, src_ip) (count_over_time({job="firewall"} |= ",block,in,4," | regexp `,block,in,4,(?:[^,]*,){9}(?P<src_ip>[0-9.]+),` [1m]))'
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [49] }
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          summary: 'Possible port scan: 50 or more blocked connections from {{ $labels.src_ip }} in 1 minute'
+        labels:
+          type: port_scan
+          severity: high
+          source: onprem
+          host: '{{ $labels.host }}'
+          src_ip: '{{ $labels.src_ip }}'
+
+      # R4 - the VPN to NetLab is down (no tunnel up) for 5 minutes
+      - uid: r4-vpn-down
+        title: R4 VPN tunnel down
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 900, to: 0 }
+            datasourceUid: cloudwatch
+            model:
+              refId: A
+              queryMode: Metrics
+              region: default
+              namespace: AWS/VPN
+              metricName: TunnelState
+              dimensions:
+                VpnId: ${vpn_connection_id}
+              statistic: Maximum
+              period: "300"
+              matchExact: true
+              metricQueryType: 0
+              metricEditorMode: 0
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator: { type: lt, params: [1] }
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: 'The Site-to-Site VPN to NetLab has no tunnel up'
+        labels:
+          type: vpn_down
+          severity: medium
+          source: cloud
+          host: aws-vpn
+
+      # R5 - no log lines from ws01 or fw01 for 15 minutes
+      - uid: r5-log-source-silent
+        title: R5 Log source silent
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 900, to: 0 }
+            datasourceUid: loki
+            model:
+              refId: A
+              editorMode: code
+              queryType: instant
+              expr: 'absent_over_time({host="ws01"}[15m]) or absent_over_time({host="fw01"}[15m])'
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [0] }
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          summary: 'No log lines from {{ $labels.host }} for 15 minutes'
+        labels:
+          type: log_source_silent
+          severity: medium
+          source: onprem
+          host: '{{ $labels.host }}'
