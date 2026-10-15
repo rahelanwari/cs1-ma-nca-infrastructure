@@ -1,0 +1,47 @@
+# =====================================================================
+# DESTROY INFRASTRUCTURE PIPELINE
+# Removes ALL AWS resources of this project, to save costs between
+# work sessions. Start it by hand and type DESTROY to confirm.
+# Build everything again with: Deploy Infrastructure -> Run workflow,
+# then Deploy Application -> Run workflow.
+# =====================================================================
+name: Destroy Infrastructure
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type DESTROY to remove all AWS resources of this project"
+        required: true
+
+# Same group as Deploy Infrastructure: never run both at the same time
+concurrency:
+  group: deploy-infra
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: powershell
+
+# Terraform also needs the VPN keys to read the configuration
+env:
+  TF_VAR_vpn_tunnel1_psk: ${{ secrets.VPN_TUNNEL1_PSK }}
+  TF_VAR_vpn_tunnel2_psk: ${{ secrets.VPN_TUNNEL2_PSK }}
+
+jobs:
+  destroy:
+    name: Destroy
+    runs-on: [self-hosted, Windows]   # same laptop runner and state file as deploy
+    if: github.event.inputs.confirm == 'DESTROY'
+    steps:
+      - name: Use LF line endings on checkout
+        run: git config --global core.autocrlf false
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Terraform Init
+        run: terraform init -input=false
+
+      - name: Terraform Destroy
+        run: terraform destroy -input=false -auto-approve
