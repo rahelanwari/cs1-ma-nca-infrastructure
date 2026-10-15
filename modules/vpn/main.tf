@@ -48,7 +48,7 @@ resource "aws_vpn_connection" "netlab" {
   # Traffic that may use the tunnel: NetLab MGMT <-> VPC
   local_ipv4_network_cidr  = var.onprem_mgmt_cidr
   remote_ipv4_network_cidr = var.vpc_cidr
-  
+
   # Fixed pre-shared keys, so pfSense keeps working after a destroy and apply
   tunnel1_preshared_key = var.tunnel1_preshared_key
   tunnel2_preshared_key = var.tunnel2_preshared_key

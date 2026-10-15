@@ -64,7 +64,7 @@ module "vpn" {
   private_route_table_id = module.network.private_route_table_id
   db_security_group_id   = module.network.db_security_group_id
   customer_gateway_ip    = var.netlab_public_ip
-  
+
   tunnel1_preshared_key = var.vpn_tunnel1_psk
   tunnel2_preshared_key = var.vpn_tunnel2_psk
 }
