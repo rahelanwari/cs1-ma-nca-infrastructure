@@ -118,7 +118,8 @@ resource "aws_instance" "mysql" {
 }
 
 resource "aws_secretsmanager_secret" "db_credentials" {
-  name = "${local.name_prefix}-db-credentials"
+  name                    = "${local.name_prefix}-db-credentials"
+  recovery_window_in_days = 0 # delete at once on destroy, so the next apply can reuse the name
 
   tags = local.common_tags
 }

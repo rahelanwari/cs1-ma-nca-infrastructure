@@ -195,8 +195,9 @@ resource "random_password" "grafana_admin" {
 }
 
 resource "aws_secretsmanager_secret" "grafana_admin" {
-  name = "${local.name_prefix}-grafana-admin"
-  tags = local.common_tags
+  name                    = "${local.name_prefix}-grafana-admin"
+  recovery_window_in_days = 0 # delete at once on destroy, so the next apply can reuse the name
+  tags                    = local.common_tags
 }
 
 resource "aws_secretsmanager_secret_version" "grafana_admin" {

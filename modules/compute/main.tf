@@ -11,6 +11,7 @@ locals {
 resource "aws_ecr_repository" "nginx" {
   name                 = "${local.name_prefix}-nginx"
   image_tag_mutability = "MUTABLE"
+  force_delete         = true # destroy also works when the repository still has images
 
   image_scanning_configuration {
     scan_on_push = true
