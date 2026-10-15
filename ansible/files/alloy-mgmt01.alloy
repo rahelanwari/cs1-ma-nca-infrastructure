@@ -1,0 +1,21 @@
+// Alloy on mgmt01 - reads the firewall log of fw01 (written by rsyslog)
+// and sends it to Loki on the same server
+
+local.file_match "firewall" {
+  path_targets = [{
+    "__path__" = "/var/log/pfsense/firewall.log",
+    "job"      = "firewall",
+    "host"     = "fw01",
+  }]
+}
+
+loki.source.file "firewall" {
+  targets    = local.file_match.firewall.targets
+  forward_to = [loki.write.local.receiver]
+}
+
+loki.write "local" {
+  endpoint {
+    url = "http://127.0.0.1:3100/loki/api/v1/push"
+  }
+}

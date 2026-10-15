@@ -1,0 +1,129 @@
+# =====================================================================
+# LOG COLLECTION IN NETLAB (block 5)
+# mgmt01: Loki (log storage), rsyslog (receives the firewall log of
+#         fw01 on UDP 514) and Alloy (sends that log to Loki)
+# ws01:   Alloy (sends /var/log/auth.log to Loki on mgmt01)
+# Run:    ansible-playbook monitoring.yml   (or the pipeline)
+# =====================================================================
+
+- name: Grafana package repository on all Linux hosts
+  hosts: linux
+  become: true
+  tasks:
+    - name: Make the folder for APT keys
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: "0755"
+
+    - name: Download the Grafana GPG key
+      ansible.builtin.get_url:
+        url: https://apt.grafana.com/gpg.key
+        dest: /etc/apt/keyrings/grafana.asc
+        mode: "0644"
+
+    - name: Add the Grafana APT repository
+      ansible.builtin.apt_repository:
+        repo: "deb [signed-by=/etc/apt/keyrings/grafana.asc] https://apt.grafana.com stable main"
+        filename: grafana
+        state: present
+        update_cache: true
+
+    # The Alloy package adds the user alloy to group adm, so it can read the logs
+    - name: Install Alloy
+      ansible.builtin.apt:
+        name: alloy
+        state: present
+
+- name: Loki and the firewall log on mgmt01
+  hosts: management
+  become: true
+  tasks:
+    - name: Install Loki
+      ansible.builtin.apt:
+        name: loki
+        state: present
+
+    - name: Make the Loki data folder
+      ansible.builtin.file:
+        path: /var/lib/loki
+        state: directory
+        owner: loki
+        mode: "0755"
+
+    - name: Loki configuration
+      ansible.builtin.copy:
+        src: files/loki-config.yml
+        dest: /etc/loki/config.yml
+        mode: "0644"
+      notify: Restart loki
+
+    - name: Make the folder for the firewall log
+      ansible.builtin.file:
+        path: /var/log/pfsense
+        state: directory
+        owner: syslog
+        group: adm
+        mode: "0755"
+
+    - name: rsyslog receives the fw01 log on UDP 514
+      ansible.builtin.copy:
+        src: files/rsyslog-pfsense.conf
+        dest: /etc/rsyslog.d/10-pfsense.conf
+        mode: "0644"
+      notify: Restart rsyslog
+
+    - name: Alloy configuration (firewall log to Loki)
+      ansible.builtin.copy:
+        src: files/alloy-mgmt01.alloy
+        dest: /etc/alloy/config.alloy
+        mode: "0644"
+      notify: Restart alloy
+
+    - name: Loki and Alloy are running and start at boot
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: started
+        enabled: true
+      loop:
+        - loki
+        - alloy
+
+  handlers:
+    - name: Restart loki
+      ansible.builtin.systemd:
+        name: loki
+        state: restarted
+
+    - name: Restart rsyslog
+      ansible.builtin.systemd:
+        name: rsyslog
+        state: restarted
+
+    - name: Restart alloy
+      ansible.builtin.systemd:
+        name: alloy
+        state: restarted
+
+- name: Auth log of ws01 to Loki
+  hosts: workstations
+  become: true
+  tasks:
+    - name: Alloy configuration (auth.log to Loki)
+      ansible.builtin.copy:
+        src: files/alloy-ws01.alloy
+        dest: /etc/alloy/config.alloy
+        mode: "0644"
+      notify: Restart alloy
+
+    - name: Alloy is running and starts at boot
+      ansible.builtin.systemd:
+        name: alloy
+        state: started
+        enabled: true
+
+  handlers:
+    - name: Restart alloy
+      ansible.builtin.systemd:
+        name: alloy
+        state: restarted

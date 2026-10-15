@@ -1,0 +1,30 @@
+# =====================================================================
+# LOG COLLECTION IN NETLAB (block 5)
+# Runs the Ansible playbook monitoring.yml on the Linux runner (mgmt01).
+# Starts on a push to the playbook or its files, or by hand.
+# =====================================================================
+name: Ansible monitoring
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "ansible/monitoring.yml"
+      - "ansible/files/**"
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Install log collection
+    runs-on: [self-hosted, Linux]   # the runner on mgmt01
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Syntax check
+        working-directory: ansible
+        run: ansible-playbook monitoring.yml --syntax-check
+
+      - name: Run playbook
+        working-directory: ansible
+        run: ansible-playbook monitoring.yml

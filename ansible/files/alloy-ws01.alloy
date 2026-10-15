@@ -1,0 +1,20 @@
+// Alloy on ws01 - reads the auth log and sends it to Loki on mgmt01
+
+local.file_match "auth" {
+  path_targets = [{
+    "__path__" = "/var/log/auth.log",
+    "job"      = "auth",
+    "host"     = "ws01",
+  }]
+}
+
+loki.source.file "auth" {
+  targets    = local.file_match.auth.targets
+  forward_to = [loki.write.mgmt01.receiver]
+}
+
+loki.write "mgmt01" {
+  endpoint {
+    url = "http://192.168.20.10:3100/loki/api/v1/push"
+  }
+}
