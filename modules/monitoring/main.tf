@@ -50,13 +50,17 @@ locals {
           path: /etc/grafana/provisioning/dashboards
   YAML
 
-  # The dashboard itself, with the real ALB / target group / ECS names filled in
-  grafana_dashboard_json = templatefile("${path.module}/dashboards/innovatech.json.tftpl", {
+  # The dashboard itself, with the real ALB / target group / ECS / VPN values filled in.
+  # jsondecode + jsonencode removes the spaces, so the task definition stays small.
+  grafana_dashboard_json = jsonencode(jsondecode(templatefile("${path.module}/dashboards/innovatech.json.tftpl", {
     alb_arn_suffix          = var.alb_arn_suffix
     target_group_arn_suffix = var.nginx_target_group_arn_suffix
     ecs_cluster_name        = var.ecs_cluster_name
     ecs_service_name        = var.ecs_service_name
-  })
+    vpn_connection_id       = var.vpn_connection_id
+    vpn_tunnel1_address     = var.vpn_tunnel1_address
+    vpn_tunnel2_address     = var.vpn_tunnel2_address
+  })))
 
   # Alert rules R1-R5 (CS2), with the real VPN id filled in
   grafana_alert_rules = templatefile("${path.module}/alerting/rules.yaml.tftpl", {

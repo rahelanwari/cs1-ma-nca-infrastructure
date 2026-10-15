@@ -102,3 +102,13 @@ variable "vpn_connection_id" {
   description = "ID of the Site-to-Site VPN connection (used by alert rule R4)"
   type        = string
 }
+
+variable "vpn_tunnel1_address" {
+  description = "Public IP of VPN tunnel 1 (dashboard panel tunnel state)"
+  type        = string
+}
+
+variable "vpn_tunnel2_address" {
+  description = "Public IP of VPN tunnel 2 (dashboard panel tunnel state)"
+  type        = string
+}

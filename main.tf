@@ -49,7 +49,9 @@ module "monitoring" {
 
   db_private_ip = module.database.db_address
 
-  vpn_connection_id = module.vpn.vpn_connection_id
+  vpn_connection_id   = module.vpn.vpn_connection_id
+  vpn_tunnel1_address = module.vpn.tunnel1_address
+  vpn_tunnel2_address = module.vpn.tunnel2_address
 }
 
 module "vpn" {
