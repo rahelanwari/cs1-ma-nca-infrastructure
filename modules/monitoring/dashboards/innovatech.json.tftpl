@@ -969,7 +969,7 @@
             "lineWidth": 2,
             "fillOpacity": 15,
             "showPoints": "never",
-            "spanNulls": true,
+            "spanNulls": false,
             "thresholdsStyle": {
               "mode": "off"
             }
@@ -1050,7 +1050,7 @@
             "lineWidth": 2,
             "fillOpacity": 15,
             "showPoints": "never",
-            "spanNulls": true,
+            "spanNulls": false,
             "thresholdsStyle": {
               "mode": "off"
             }
@@ -1201,7 +1201,7 @@
             "lastNotNull"
           ],
           "fields": "",
-          "values": false
+          "values": true
         },
         "orientation": "horizontal",
         "displayMode": "gradient",
@@ -1220,6 +1220,20 @@
           "expr": "topk(5, sum by (src_ip) (count_over_time({job=\"firewall\"} |= \",block,in,4,\" | regexp `,block,in,4,(?:[^,]*,){9}(?P<src_ip>[0-9.]+),` [1h])))",
           "queryType": "instant",
           "legendFormat": "{{src_ip}}"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "sortBy",
+          "options": {
+            "fields": {},
+            "sort": [
+              {
+                "field": "Value #A",
+                "desc": true
+              }
+            ]
+          }
         }
       ]
     },
