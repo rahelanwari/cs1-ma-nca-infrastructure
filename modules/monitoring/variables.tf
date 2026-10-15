@@ -91,3 +91,9 @@ variable "log_retention_days" {
   type    = number
   default = 14
 }
+
+variable "loki_url" {
+  description = "Loki on mgmt01 in NetLab, reached over the VPN by its private DNS name"
+  type        = string
+  default     = "http://loki.innovatech.internal:3100"
+}

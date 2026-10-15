@@ -32,6 +32,11 @@ locals {
         jsonData:
           authType: default
           defaultRegion: ${data.aws_region.current.name}
+      - name: Loki
+        type: loki
+        uid: loki
+        access: proxy
+        url: ${var.loki_url}
   YAML
 
   # Tells Grafana to load every dashboard JSON file from this folder
