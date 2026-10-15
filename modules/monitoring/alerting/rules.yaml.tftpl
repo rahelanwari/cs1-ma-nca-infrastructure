@@ -32,12 +32,12 @@ groups:
         execErrState: Error
         for: 0s
         annotations:
-          summary: 'Failed SSH login(s) on {{ $labels.host }} in the last 5 minutes'
+          summary: 'Failed SSH login(s) on {{ .Labels.host }} in the last 5 minutes'
         labels:
           type: ssh_failed_login
           severity: low
           source: onprem
-          host: '{{ $labels.host }}'
+          host: '{{ .Labels.host }}'
 
       # R2 - 5 or more failed SSH logins from one IP address in 5 minutes
       - uid: r2-ssh-brute-force
@@ -64,13 +64,13 @@ groups:
         execErrState: Error
         for: 0s
         annotations:
-          summary: '5 or more failed SSH logins on {{ $labels.host }} from {{ $labels.src_ip }} in 5 minutes'
+          summary: '5 or more failed SSH logins on {{ .Labels.host }} from {{ .Labels.src_ip }} in 5 minutes'
         labels:
           type: ssh_brute_force
           severity: medium
           source: onprem
-          host: '{{ $labels.host }}'
-          src_ip: '{{ $labels.src_ip }}'
+          host: '{{ .Labels.host }}'
+          src_ip: '{{ .Labels.src_ip }}'
 
       # R3 - 50 or more blocked connections from one source in 1 minute (fw01)
       - uid: r3-port-scan
@@ -97,13 +97,13 @@ groups:
         execErrState: Error
         for: 0s
         annotations:
-          summary: 'Possible port scan: 50 or more blocked connections from {{ $labels.src_ip }} in 1 minute'
+          summary: 'Possible port scan: 50 or more blocked connections from {{ .Labels.src_ip }} in 1 minute'
         labels:
           type: port_scan
           severity: high
           source: onprem
-          host: '{{ $labels.host }}'
-          src_ip: '{{ $labels.src_ip }}'
+          host: '{{ .Labels.host }}'
+          src_ip: '{{ .Labels.src_ip }}'
 
       # R4 - the VPN to NetLab is down (no tunnel up) for 5 minutes
       - uid: r4-vpn-down
@@ -177,9 +177,9 @@ groups:
         execErrState: Error
         for: 0s
         annotations:
-          summary: 'No log lines from {{ $labels.host }} for 15 minutes'
+          summary: 'No log lines from {{ .Labels.host }} for 15 minutes'
         labels:
           type: log_source_silent
           severity: medium
           source: onprem
-          host: '{{ $labels.host }}'
+          host: '{{ .Labels.host }}'
