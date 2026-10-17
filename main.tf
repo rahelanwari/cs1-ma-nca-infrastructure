@@ -78,3 +78,18 @@ module "dns" {
   vpc_id        = module.network.vpc_id
   db_private_ip = module.database.db_address
 }
+
+module "soar" {
+  source = "./modules/soar"
+
+  project_name = var.project_name
+  environment  = var.environment
+
+  vpc_id                       = module.network.vpc_id
+  app_subnet_ids               = module.network.app_subnet_ids
+  ecs_cluster_name             = module.compute.ecs_cluster_name
+  monitoring_security_group_id = module.monitoring.monitoring_security_group_id
+  sns_topic_arn                = module.monitoring.sns_topic_arn
+  dns_zone_id                  = module.dns.zone_id
+  dns_zone_name                = module.dns.zone_name
+}

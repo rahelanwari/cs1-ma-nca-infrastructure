@@ -99,3 +99,23 @@ output "db_fqdn" {
   description = "Private DNS name of the database server"
   value       = module.dns.db_fqdn
 }
+
+output "soar_ecr_repository_url" {
+  description = "ECR repository of the SOAR image"
+  value       = module.soar.ecr_repository_url
+}
+
+output "soar_incident_bucket" {
+  description = "S3 bucket with the SOAR incident records"
+  value       = module.soar.incident_bucket
+}
+
+output "soar_service_name" {
+  description = "ECS service of the SOAR"
+  value       = module.soar.service_name
+}
+
+output "soar_url" {
+  description = "Webhook URL of the SOAR (Grafana contact point)"
+  value       = module.soar.soar_url
+}
