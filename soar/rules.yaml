@@ -1,0 +1,29 @@
+# SOAR rules: which response actions run for which alert type.
+# The type comes from the "type" label of the Grafana alert (rules R1-R5).
+# The tier (LOW / MEDIUM / CRITICAL) comes from the "severity" label.
+#
+# Actions:
+#   log_incident  A1 - store the incident as a JSON file in S3
+#   notify        A2 - send an e-mail to the IT staff via SNS
+#
+# Add a rule: add one entry below and push. The pipeline tests and deploys it.
+
+rules:
+  - type: ssh_failed_login        # R1 - tier low: record only
+    actions: [log_incident]
+
+  - type: ssh_brute_force         # R2 - tier medium
+    actions: [log_incident, notify]
+
+  - type: port_scan               # R3 - tier high: e-mail subject CRITICAL
+    actions: [log_incident, notify]
+
+  - type: vpn_down                # R4 - tier medium (cloud component)
+    actions: [log_incident, notify]
+
+  - type: log_source_silent       # R5 - tier medium
+    actions: [log_incident, notify]
+
+# Unknown alert type: never lose an alert
+default:
+  actions: [log_incident, notify]
