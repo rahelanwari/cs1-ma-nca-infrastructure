@@ -1,0 +1,122 @@
+# =====================================================================
+# DEPLOY SOAR PIPELINE (CS2 block 6)
+# Stages: Test -> Build -> Push to ECR -> Deploy to ECS
+# - Test runs ruff (lint) and pytest inside Docker. If a test fails,
+#   no image is built and nothing is deployed.
+# - Starts on a push to soar/ or by hand (Run workflow).
+# The infrastructure (ECR, ECS service, S3, IAM) is in modules/soar
+# and is deployed by the Deploy Infrastructure pipeline.
+# =====================================================================
+name: Deploy SOAR
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "soar/**"
+      - ".github/workflows/deploy-soar.yml"
+  workflow_dispatch:
+
+# Only one SOAR deployment at a time
+concurrency:
+  group: deploy-soar
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: eu-west-1
+  ECR_REPOSITORY: innovatech-cs1-dev-soar
+  ECS_CLUSTER: innovatech-cs1-dev-cluster
+  ECS_SERVICE: innovatech-cs1-dev-soar-service
+  IMAGE_TAG: ${{ github.sha }}   # every image can be traced back to a commit
+
+defaults:
+  run:
+    shell: powershell
+
+jobs:
+  # ------------------------------------------------------------------
+  # Stage 1: TEST - lint and unit tests (inside Docker)
+  # ------------------------------------------------------------------
+  test:
+    name: Test
+    runs-on: [self-hosted, Windows]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Lint and unit tests
+        run: |
+          docker build --progress=plain --target test -t soar-test ./soar
+          if ($LASTEXITCODE -ne 0) { throw "Lint or tests failed - nothing is built or deployed" }
+          Write-Host "Lint and all tests passed"
+
+  # ------------------------------------------------------------------
+  # Stage 2: BUILD - the runtime image
+  # ------------------------------------------------------------------
+  build:
+    name: Build
+    runs-on: [self-hosted, Windows]
+    needs: test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: |
+          $image = "${env:ECR_REPOSITORY}:${env:IMAGE_TAG}"
+          docker build -t $image ./soar
+          if ($LASTEXITCODE -ne 0) { throw "Docker build failed" }
+          Write-Host "Built image $image"
+
+  # ------------------------------------------------------------------
+  # Stage 3: PUSH - store the image in Amazon ECR
+  # ------------------------------------------------------------------
+  push:
+    name: Push to ECR
+    runs-on: [self-hosted, Windows]
+    needs: build
+    steps:
+      - name: Resolve ECR registry URL
+        run: |
+          $accountId = (aws sts get-caller-identity --query Account --output text)
+          if ($LASTEXITCODE -ne 0) { throw "AWS credentials are missing or expired" }
+          $registry = "$accountId.dkr.ecr.$env:AWS_REGION.amazonaws.com"
+          echo "REGISTRY=$registry" >> $env:GITHUB_ENV
+
+      - name: Log in to ECR
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%p in (`aws ecr get-login-password --region %AWS_REGION%`) do (echo %%p| docker login --username AWS --password-stdin %REGISTRY%)
+
+      - name: Tag and push image
+        run: |
+          $localImage   = "${env:ECR_REPOSITORY}:${env:IMAGE_TAG}"
+          $remoteSha    = "$env:REGISTRY/${env:ECR_REPOSITORY}:${env:IMAGE_TAG}"
+          $remoteLatest = "$env:REGISTRY/${env:ECR_REPOSITORY}:latest"
+
+          docker tag $localImage $remoteSha
+          docker tag $localImage $remoteLatest
+
+          docker push $remoteSha
+          if ($LASTEXITCODE -ne 0) { throw "Push of $remoteSha failed" }
+          docker push $remoteLatest
+          if ($LASTEXITCODE -ne 0) { throw "Push of the latest tag failed" }
+
+  # ------------------------------------------------------------------
+  # Stage 4: DEPLOY - start new SOAR tasks with the new image
+  # ------------------------------------------------------------------
+  deploy:
+    name: Deploy to ECS
+    runs-on: [self-hosted, Windows]
+    needs: push
+    steps:
+      - name: Force new ECS deployment
+        run: |
+          aws ecs update-service --cluster $env:ECS_CLUSTER --service $env:ECS_SERVICE --force-new-deployment --region $env:AWS_REGION | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "ECS update-service failed" }
+
+      - name: Wait until the service is stable
+        run: |
+          aws ecs wait services-stable --cluster $env:ECS_CLUSTER --services $env:ECS_SERVICE --region $env:AWS_REGION
+          if ($LASTEXITCODE -ne 0) { throw "The SOAR service did not become stable - check the ECS service events" }
+          Write-Host "Deployment of $env:IMAGE_TAG finished: 2 healthy SOAR tasks are running"
