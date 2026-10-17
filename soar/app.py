@@ -19,7 +19,14 @@ from prometheus_client import (
 )
 
 from actions import Actions
-from engine import KNOWN_ACTIONS, SOURCES, TIERS, actions_for, load_rules, normalize_alert
+from engine import (
+    KNOWN_ACTIONS,
+    SOURCES,
+    TIERS,
+    actions_for,
+    load_rules,
+    normalize_alert,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("soar")
