@@ -62,6 +62,11 @@ locals {
     vpn_tunnel2_address     = var.vpn_tunnel2_address
   })))
 
+  # Contact point: every alert goes to the SOAR webhook (CS2 block 6)
+  grafana_contact_points = templatefile("${path.module}/alerting/contactpoints.yaml.tftpl", {
+    soar_webhook_url = var.soar_webhook_url
+  })
+
   # Alert rules R1-R5 (CS2), with the real VPN id filled in
   grafana_alert_rules = templatefile("${path.module}/alerting/rules.yaml.tftpl", {
     vpn_connection_id = var.vpn_connection_id
@@ -301,6 +306,11 @@ resource "aws_ecs_task_definition" "monitoring" {
           - job_name: 'database'
             static_configs:
               - targets: ['${var.db_private_ip}:9100']
+          - job_name: 'soar'
+            dns_sd_configs:
+              - names: ['${var.soar_discovery_name}']
+                type: A
+                port: 8080
         PCFG
         exec /bin/prometheus --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.path=/prometheus
         EOT
@@ -329,6 +339,7 @@ resource "aws_ecs_task_definition" "monitoring" {
         echo '${base64encode(local.grafana_dashboard_provider)}' | base64 -d > /etc/grafana/provisioning/dashboards/provider.yaml
         echo '${base64encode(local.grafana_dashboard_json)}' | base64 -d > /etc/grafana/provisioning/dashboards/innovatech.json
         echo '${base64encode(local.grafana_alert_rules)}' | base64 -d > /etc/grafana/provisioning/alerting/rules.yaml
+        echo '${base64encode(local.grafana_contact_points)}' | base64 -d > /etc/grafana/provisioning/alerting/contactpoints.yaml
         exec /run.sh
         EOT
       ]

@@ -112,3 +112,15 @@ variable "vpn_tunnel2_address" {
   description = "Public IP of VPN tunnel 2 (dashboard panel tunnel state)"
   type        = string
 }
+
+variable "soar_webhook_url" {
+  description = "Webhook of the SOAR; Grafana sends every alert here (contact point)"
+  type        = string
+  default     = "http://soar.innovatech.internal:8080/alerts"
+}
+
+variable "soar_discovery_name" {
+  description = "Service discovery name of the SOAR tasks; Prometheus scrapes every task"
+  type        = string
+  default     = "soar.svc.innovatech.internal"
+}
