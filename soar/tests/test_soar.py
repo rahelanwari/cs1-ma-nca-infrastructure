@@ -150,19 +150,31 @@ def test_invalid_request_returns_400():
     assert "soar_invalid_requests_total 1.0" in client.get("/metrics").get_data(as_text=True)
 
 
+def has_sample(metrics, name, value, **labels):
+    """True when /metrics contains this sample. The order of the labels does not matter."""
+    return any(
+        line.startswith(name + "{")
+        and line.endswith(f"}} {value}")
+        and all(f'{key}="{val}"' in line for key, val in labels.items())
+        for line in metrics.splitlines()
+    )
+
+
 def test_metrics_show_the_received_events():
     client, _, _ = make_client()
     client.post("/alerts", json=SAMPLE)
     metrics = client.get("/metrics").get_data(as_text=True)
-    assert 'soar_events_received_total{type="ssh_brute_force",severity="medium",source="onprem"} 1.0' in metrics
+    assert has_sample(metrics, "soar_events_received_total", "1.0",
+                      type="ssh_brute_force", severity="medium", source="onprem")
     assert "soar_processing_seconds_count 1.0" in metrics
 
 
 def test_metrics_start_at_zero():
     client, _, _ = make_client()
     metrics = client.get("/metrics").get_data(as_text=True)
-    assert 'soar_events_received_total{type="port_scan",severity="high",source="onprem"} 0.0' in metrics
-    assert 'soar_actions_total{action="notify",result="failed"} 0.0' in metrics
+    assert has_sample(metrics, "soar_events_received_total", "0.0",
+                      type="port_scan", severity="high", source="onprem")
+    assert has_sample(metrics, "soar_actions_total", "0.0", action="notify", result="failed")
 
 
 def test_health():
