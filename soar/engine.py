@@ -14,6 +14,9 @@ KNOWN_ACTIONS = {"log_incident", "notify"}
 # Severity label of the alert -> response tier (Phase 1 design, 6.3)
 TIERS = {"low": "LOW", "medium": "MEDIUM", "high": "CRITICAL"}
 
+# Values of the "source" label of the alert rules (on-premises or AWS)
+SOURCES = ("onprem", "cloud")
+
 
 def load_rules(path):
     """Read rules.yaml and check it. Returns {"rules": {type: [actions]}, "default": [actions]}."""

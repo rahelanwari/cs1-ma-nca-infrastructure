@@ -154,9 +154,15 @@ def test_metrics_show_the_received_events():
     client, _, _ = make_client()
     client.post("/alerts", json=SAMPLE)
     metrics = client.get("/metrics").get_data(as_text=True)
-    assert "soar_events_received_total" in metrics
-    assert 'type="ssh_brute_force"' in metrics
+    assert 'soar_events_received_total{type="ssh_brute_force",severity="medium",source="onprem"} 1.0' in metrics
     assert "soar_processing_seconds_count 1.0" in metrics
+
+
+def test_metrics_start_at_zero():
+    client, _, _ = make_client()
+    metrics = client.get("/metrics").get_data(as_text=True)
+    assert 'soar_events_received_total{type="port_scan",severity="high",source="onprem"} 0.0' in metrics
+    assert 'soar_actions_total{action="notify",result="failed"} 0.0' in metrics
 
 
 def test_health():

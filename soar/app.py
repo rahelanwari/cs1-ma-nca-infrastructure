@@ -19,7 +19,7 @@ from prometheus_client import (
 )
 
 from actions import Actions
-from engine import actions_for, load_rules, normalize_alert
+from engine import KNOWN_ACTIONS, SOURCES, TIERS, actions_for, load_rules, normalize_alert
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("soar")
@@ -57,6 +57,17 @@ def create_app(rules=None, actions=None, registry=None):
     invalid = Counter("soar_invalid_requests_total", "Requests that were not a valid Grafana alert",
                       registry=registry)
     duration = Histogram("soar_processing_seconds", "Time to process one alert", registry=registry)
+
+    # Start all known series at 0. Prometheus then sees the counter go from 0 to 1,
+    # so increase() in Grafana also counts the first alert of a type.
+    for alert_type in rules["rules"]:
+        for severity in TIERS:
+            for source in SOURCES:
+                events.labels(type=alert_type, severity=severity, source=source)
+    for name in KNOWN_ACTIONS:
+        for result in ("success", "failed"):
+            action_runs.labels(action=name, result=result)
+    skipped.labels(reason="resolved")
 
     def run(name, func, *args):
         """Run one action. A failing action is counted and logged; the other actions still run."""
