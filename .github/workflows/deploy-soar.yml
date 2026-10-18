@@ -3,7 +3,9 @@
 # Stages: Test -> Build -> Push to ECR -> Deploy to ECS
 # - Test runs ruff (lint) and pytest inside Docker. If a test fails,
 #   no image is built and nothing is deployed.
-# - Starts on a push to soar/ or by hand (Run workflow).
+# - Starts on a push to soar/, by hand (Run workflow), and every week
+#   (block 7): the image is rebuilt on the newest base image, so the
+#   container also gets its OS and Python security updates.
 # The infrastructure (ECR, ECS service, S3, IAM) is in modules/soar
 # and is deployed by the Deploy Infrastructure pipeline.
 # =====================================================================
@@ -15,6 +17,8 @@ on:
     paths:
       - "soar/**"
       - ".github/workflows/deploy-soar.yml"
+  schedule:
+    - cron: "0 2 * * 0"   # weekly rebuild on a fresh base image (Sunday, after the OS updates)
   workflow_dispatch:
 
 # Only one SOAR deployment at a time
@@ -46,7 +50,8 @@ jobs:
 
       - name: Lint and unit tests
         run: |
-          docker build --progress=plain --target test -t soar-test ./soar
+          # --pull: always use the newest python:3.12-slim base image
+          docker build --pull --progress=plain --target test -t soar-test ./soar
           if ($LASTEXITCODE -ne 0) { throw "Lint or tests failed - nothing is built or deployed" }
           Write-Host "Lint and all tests passed"
 
@@ -64,7 +69,7 @@ jobs:
       - name: Build Docker image
         run: |
           $image = "${env:ECR_REPOSITORY}:${env:IMAGE_TAG}"
-          docker build -t $image ./soar
+          docker build --pull -t $image ./soar
           if ($LASTEXITCODE -ne 0) { throw "Docker build failed" }
           Write-Host "Built image $image"
 
