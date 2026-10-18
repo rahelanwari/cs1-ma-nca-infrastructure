@@ -1,0 +1,52 @@
+# =====================================================================
+# UPDATE MECHANISM (block 7, REQ-NCA-P2-05)
+# Installs all updates on the Linux hosts in NetLab, one host at a time.
+# - serial: 1               rolling: one host at a time
+# - max_fail_percentage: 0  stop at the first failure, so a bad update
+#                           never reaches every machine
+# - mgmt01 is not rebooted automatically: the pipeline runs on it.
+#   A pending reboot is shown in the log.
+# Run: ansible-playbook updates.yml   (or the pipeline "Updates")
+# =====================================================================
+
+- name: Install updates on the Linux hosts
+  hosts: linux
+  become: true
+  serial: 1
+  max_fail_percentage: 0
+
+  tasks:
+    - name: Install all updates (apt update + dist-upgrade)
+      ansible.builtin.apt:
+        update_cache: true
+        upgrade: dist
+        autoremove: true
+        autoclean: true
+        lock_timeout: 300   # wait if unattended-upgrades is busy
+      register: apt_result
+
+    - name: Check if a reboot is needed
+      ansible.builtin.stat:
+        path: /var/run/reboot-required
+      register: reboot_file
+
+    - name: Reboot the host if needed (not the runner mgmt01)
+      ansible.builtin.reboot:
+        reboot_timeout: 600
+        msg: "Reboot after updates (Ansible)"
+      when:
+        - reboot_file.stat.exists
+        - inventory_hostname != "mgmt01"
+
+    - name: Count the updates that are still available
+      ansible.builtin.shell: apt list --upgradable 2>/dev/null | grep -c upgradable || true
+      register: remaining
+      changed_when: false
+
+    - name: Result for this host
+      ansible.builtin.debug:
+        msg:
+          - "Packages changed: {{ apt_result.changed }}"
+          - "Updates still available: {{ remaining.stdout }}"
+          - "Kernel: {{ ansible_kernel }}"
+          - "Reboot pending: {{ (reboot_file.stat.exists and inventory_hostname == 'mgmt01') | ternary('yes (runner, reboot by hand)', 'no') }}"
