@@ -38,10 +38,25 @@ class FakeSNS:
         self.messages.append(kwargs)
 
 
-def make_client(s3_fails=False):
+class FakeBlocker:
+    """Stands in for the SSH connection to mgmt01 (action A3 block_ip)."""
+
+    def __init__(self, fail=False):
+        self.banned = []
+        self.fail = fail
+
+    def ban(self, ip):
+        if self.fail:
+            raise RuntimeError("mgmt01 is not reachable")
+        self.banned.append(ip)
+        return f"BANNED: {ip} on ws01 for 5 minutes"
+
+
+def make_client(s3_fails=False, blocker=None):
     """A test client of the SOAR with fake AWS clients and its own metrics."""
     s3, sns = FakeS3(fail=s3_fails), FakeSNS()
-    actions = Actions(s3=s3, sns=sns, bucket="test-bucket", topic_arn="arn:aws:sns:eu-west-1:123:test")
+    actions = Actions(s3=s3, sns=sns, bucket="test-bucket", topic_arn="arn:aws:sns:eu-west-1:123:test",
+                      blocker=blocker or FakeBlocker())
     app = create_app(rules=load_rules(DEFAULT_RULES), actions=actions, registry=CollectorRegistry())
     return app.test_client(), s3, sns
 
@@ -112,8 +127,8 @@ def test_medium_tier_records_and_notifies():
 
     record = json.loads(s3.objects[0]["Body"])
     assert record["type"] == "ssh_brute_force"
-    assert record["actions"][0] == {"action": "notify", "result": "success",
-                                    "detail": sns.messages[0]["Subject"]}
+    assert {"action": "notify", "result": "success",
+            "detail": sns.messages[0]["Subject"]} in record["actions"]
     assert record["alert"]["labels"]["alertname"] == "R2 SSH brute force"
 
 
@@ -180,3 +195,46 @@ def test_metrics_start_at_zero():
 def test_health():
     client, _, _ = make_client()
     assert client.get("/health").get_json() == {"status": "ok"}
+
+
+# ---------------------------------------------------------------- block action (A3)
+
+def test_brute_force_blocks_the_attacker():
+    blocker = FakeBlocker()
+    client, s3, sns = make_client(blocker=blocker)
+    client.post("/alerts", json=webhook("ssh_brute_force", "medium", src_ip="192.168.10.66"))
+    assert blocker.banned == ["192.168.10.66"]
+    assert len(sns.messages) == 1
+
+    record = json.loads(s3.objects[0]["Body"])
+    assert record["actions"][0] == {"action": "block_ip", "result": "success",
+                                    "detail": "BANNED: 192.168.10.66 on ws01 for 5 minutes"}
+
+
+def test_whitelisted_ip_is_never_blocked():
+    blocker = FakeBlocker()
+    client, _, sns = make_client(blocker=blocker)
+    client.post("/alerts", json=SAMPLE)  # src_ip 192.168.20.10 is mgmt01
+    assert blocker.banned == []
+    assert len(sns.messages) == 1  # the e-mail is still sent
+
+    metrics = client.get("/metrics").get_data(as_text=True)
+    assert has_sample(metrics, "soar_actions_total", "1.0", action="block_ip", result="failed")
+
+
+@pytest.mark.parametrize("bad_ip", ["", "1.2.3.4; reboot", "999.1.1.1", "ws01"])
+def test_block_ip_only_accepts_one_ip_address(bad_ip):
+    blocker = FakeBlocker()
+    event = normalize_alert(webhook("ssh_brute_force", "medium", src_ip=bad_ip)["alerts"][0])
+    with pytest.raises(ValueError):
+        Actions(blocker=blocker).block_ip(event)
+    assert blocker.banned == []
+
+
+def test_failed_block_still_sends_the_email():
+    client, s3, sns = make_client(blocker=FakeBlocker(fail=True))
+    client.post("/alerts", json=webhook("ssh_brute_force", "medium", src_ip="192.168.10.66"))
+    assert len(sns.messages) == 1
+    record = json.loads(s3.objects[0]["Body"])
+    assert record["actions"][0]["action"] == "block_ip"
+    assert record["actions"][0]["result"] == "failed"

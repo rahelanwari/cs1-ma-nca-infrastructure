@@ -18,7 +18,7 @@ from prometheus_client import (
     generate_latest,
 )
 
-from actions import Actions
+from actions import Actions, SshBlocker
 from engine import (
     KNOWN_ACTIONS,
     SOURCES,
@@ -44,9 +44,18 @@ def actions_from_env():
     bucket = os.environ["INCIDENT_BUCKET"]
     topic_arn = os.environ["SNS_TOPIC_ARN"]
     region = os.environ.get("AWS_REGION", "eu-west-1")
+
+    # A3 block_ip: only when the connection to mgmt01 is configured
+    blocker = None
+    if os.environ.get("BLOCK_HOST"):
+        blocker = SshBlocker(host=os.environ["BLOCK_HOST"],
+                             user=os.environ.get("BLOCK_USER", "student"),
+                             private_key=os.environ["BLOCK_SSH_KEY"],
+                             host_key=os.environ["BLOCK_HOST_KEY"])
+
     return Actions(s3=boto3.client("s3", region_name=region),
                    sns=boto3.client("sns", region_name=region),
-                   bucket=bucket, topic_arn=topic_arn)
+                   bucket=bucket, topic_arn=topic_arn, blocker=blocker)
 
 
 def create_app(rules=None, actions=None, registry=None):

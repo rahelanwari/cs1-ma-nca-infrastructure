@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 
 import yaml
 
-KNOWN_ACTIONS = {"log_incident", "notify"}
+KNOWN_ACTIONS = {"log_incident", "notify", "block_ip"}
 
 # Severity label of the alert -> response tier (Phase 1 design, 6.3)
 TIERS = {"low": "LOW", "medium": "MEDIUM", "high": "CRITICAL"}
