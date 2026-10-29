@@ -2,7 +2,9 @@
 # LOG COLLECTION IN NETLAB (block 5)
 # mgmt01: Loki (log storage), rsyslog (receives the firewall log of
 #         fw01 on UDP 514) and Alloy (sends that log to Loki)
-# ws01:   Alloy (sends /var/log/auth.log to Loki on mgmt01)
+#         soar-ban (the SOAR may ban an IP on ws01 via this script)
+# ws01:   Alloy (sends /var/log/auth.log to Loki on mgmt01) and
+#         fail2ban (bans an IP for 5 minutes when the SOAR asks for it)
 # Run:    ansible-playbook monitoring.yml   (or the pipeline)
 # =====================================================================
 
@@ -127,8 +129,7 @@
       ansible.builtin.systemd:
         name: alloy
         state: restarted
-
-        
+   
 # =====================================================================
 # FAIL2BAN ON WS01 (SOAR block action)
 # fail2ban is only the ban tool: it never bans by itself (maxretry is
@@ -168,3 +169,27 @@
       ansible.builtin.systemd:
         name: fail2ban
         state: restarted
+        
+# =====================================================================
+# SOAR BAN SCRIPT ON MGMT01 (SOAR block action)
+# The SOAR key may ONLY run soar-ban (forced command), and only from
+# the AWS app subnets where the SOAR tasks run (from=).
+# =====================================================================
+- name: SOAR ban script on mgmt01
+  hosts: management
+  become: true
+  tasks:
+    - name: Install the ban script
+      ansible.builtin.copy:
+        src: files/soar-ban.sh
+        dest: /usr/local/bin/soar-ban
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: SOAR key - only the ban script, only from the AWS app subnets
+      ansible.posix.authorized_key:
+        user: student
+        key: "{{ lookup('file', 'files/soar_ban.pub') }}"
+        key_options: 'from="10.0.10.0/23",command="/usr/local/bin/soar-ban",no-port-forwarding,no-agent-forwarding,no-X11-forwarding,no-pty'
+        state: present
