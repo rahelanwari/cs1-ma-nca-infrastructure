@@ -127,3 +127,44 @@
       ansible.builtin.systemd:
         name: alloy
         state: restarted
+
+        
+# =====================================================================
+# FAIL2BAN ON WS01 (SOAR block action)
+# fail2ban is only the ban tool: it never bans by itself (maxretry is
+# very high). The SOAR decides and asks for a ban via mgmt01.
+# A ban lasts 5 minutes and is removed automatically.
+# =====================================================================
+- name: fail2ban on ws01 (ban tool for the SOAR)
+  hosts: workstations
+  become: true
+  tasks:
+    - name: Install fail2ban
+      ansible.builtin.apt:
+        name: fail2ban
+        state: present
+        update_cache: true
+
+    - name: SSH jail - bans come only from the SOAR, a ban lasts 5 minutes
+      ansible.builtin.copy:
+        dest: /etc/fail2ban/jail.d/sshd.local
+        content: |
+          [sshd]
+          enabled  = true
+          maxretry = 1000
+          bantime  = 5m
+          ignoreip = 127.0.0.1/8 192.168.20.10
+        mode: "0644"
+      notify: Restart fail2ban
+
+    - name: fail2ban is running and starts at boot
+      ansible.builtin.systemd:
+        name: fail2ban
+        state: started
+        enabled: true
+
+  handlers:
+    - name: Restart fail2ban
+      ansible.builtin.systemd:
+        name: fail2ban
+        state: restarted
