@@ -92,4 +92,7 @@ module "soar" {
   sns_topic_arn                = module.monitoring.sns_topic_arn
   dns_zone_id                  = module.dns.zone_id
   dns_zone_name                = module.dns.zone_name
+
+  block_ssh_private_key = var.soar_ssh_private_key
+  block_host_key        = var.mgmt01_host_key
 }

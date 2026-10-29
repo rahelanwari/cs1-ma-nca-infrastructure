@@ -23,10 +23,11 @@ defaults:
   run:
     shell: powershell
 
-# Terraform also needs the VPN keys to read the configuration
+# Terraform also needs the VPN keys and the SOAR SSH key to read the configuration
 env:
   TF_VAR_vpn_tunnel1_psk: ${{ secrets.VPN_TUNNEL1_PSK }}
   TF_VAR_vpn_tunnel2_psk: ${{ secrets.VPN_TUNNEL2_PSK }}
+  TF_VAR_soar_ssh_private_key: ${{ secrets.SOAR_SSH_KEY }}
 
 jobs:
   destroy:

@@ -33,3 +33,15 @@ variable "vpn_tunnel2_psk" {
   type        = string
   sensitive   = true
 }
+
+variable "soar_ssh_private_key" {
+  description = "Private SSH key of the SOAR for the ban script on mgmt01 (from the GitHub secret SOAR_SSH_KEY)"
+  type        = string
+  sensitive   = true
+}
+
+variable "mgmt01_host_key" {
+  description = "Public ed25519 host key of mgmt01 (base64 part of /etc/ssh/ssh_host_ed25519_key.pub)"
+  type        = string
+  default     = "AAAAC3NzaC1lZDI1NTE5AAAAIEe0V78QXUdEoEKPWxaYJNHQQLQ1jXZHOhMOBQ6f3lON"
+}

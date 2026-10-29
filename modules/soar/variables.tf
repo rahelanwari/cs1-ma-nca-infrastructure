@@ -69,3 +69,22 @@ variable "log_retention_days" {
   type        = number
   default     = 14
 }
+
+# ---------------------------------------------------------------- action A3 block_ip
+
+variable "block_ssh_private_key" {
+  description = "Private SSH key of the SOAR for the ban script on mgmt01 (GitHub secret SOAR_SSH_KEY)"
+  type        = string
+  sensitive   = true
+}
+
+variable "block_host" {
+  description = "mgmt01 in NetLab: runs the ban script for action A3 block_ip (over the VPN)"
+  type        = string
+  default     = "192.168.20.10"
+}
+
+variable "block_host_key" {
+  description = "Public ed25519 host key of mgmt01 (base64 part), so the SOAR only trusts the real mgmt01"
+  type        = string
+}

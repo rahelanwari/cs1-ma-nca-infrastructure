@@ -1,7 +1,8 @@
 # =====================================================================
 # SOAR module (CS2 block 6): Python SOAR service on ECS Fargate
 # Grafana sends alerts to POST /alerts on port 8080; the SOAR stores
-# incidents in S3 (A1) and sends e-mails via SNS (A2).
+# incidents in S3 (A1), sends e-mails via SNS (A2) and bans the attacker
+# on ws01 for 5 minutes via mgmt01 (A3, over the VPN).
 # =====================================================================
 
 locals {
@@ -73,7 +74,7 @@ resource "aws_security_group" "soar" {
   }
 
   egress {
-    description = "S3, SNS and ECR over HTTPS (via the NAT gateway)"
+    description = "S3, SNS, ECR over HTTPS (NAT) and SSH to mgmt01 (VPN, ban script)"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
@@ -108,6 +109,39 @@ resource "aws_iam_role" "execution" {
 resource "aws_iam_role_policy_attachment" "execution" {
   role       = aws_iam_role.execution.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+}
+
+# ---------------------------------------------------------------- SSH key for A3 block_ip
+# The private key comes from the GitHub secret SOAR_SSH_KEY, never from the code.
+# On mgmt01 this key may ONLY run the ban script (forced command).
+resource "aws_secretsmanager_secret" "block_key" {
+  name                    = "${local.name_prefix}-soar-block-key"
+  description             = "SSH key of the SOAR: may only run the ban script on mgmt01"
+  recovery_window_in_days = 0 # delete at once on destroy, so the next apply can reuse the name
+  tags                    = local.common_tags
+}
+
+resource "aws_secretsmanager_secret_version" "block_key" {
+  secret_id     = aws_secretsmanager_secret.block_key.id
+  secret_string = var.block_ssh_private_key
+}
+
+# The execution role may read this one secret, so ECS can give it to the container
+resource "aws_iam_role_policy" "execution_block_key" {
+  name = "${local.name_prefix}-soar-read-block-key"
+  role = aws_iam_role.execution.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "ReadBlockKey"
+        Effect   = "Allow"
+        Action   = ["secretsmanager:GetSecretValue"]
+        Resource = aws_secretsmanager_secret.block_key.arn
+      }
+    ]
+  })
 }
 
 # Task role: the SOAR itself may ONLY write incidents and publish to the topic
@@ -200,7 +234,15 @@ resource "aws_ecs_task_definition" "soar" {
       environment = [
         { name = "INCIDENT_BUCKET", value = aws_s3_bucket.incidents.bucket },
         { name = "SNS_TOPIC_ARN", value = var.sns_topic_arn },
-        { name = "AWS_REGION", value = data.aws_region.current.name }
+        { name = "AWS_REGION", value = data.aws_region.current.name },
+        { name = "BLOCK_HOST", value = var.block_host },
+        { name = "BLOCK_USER", value = "student" },
+        { name = "BLOCK_HOST_KEY", value = var.block_host_key }
+      ]
+
+      # A3 block_ip: ECS reads the private key from Secrets Manager at start-up
+      secrets = [
+        { name = "BLOCK_SSH_KEY", valueFrom = aws_secretsmanager_secret.block_key.arn }
       ]
 
       # ECS replaces a task that stops answering on /health
@@ -243,6 +285,11 @@ resource "aws_ecs_service" "soar" {
     registry_arn = aws_service_discovery_service.soar.arn
   }
 
-  depends_on = [aws_iam_role_policy_attachment.execution]
-  tags       = local.common_tags
+  depends_on = [
+    aws_iam_role_policy_attachment.execution,
+    aws_iam_role_policy.execution_block_key,
+    aws_secretsmanager_secret_version.block_key
+  ]
+
+  tags = local.common_tags
 }
