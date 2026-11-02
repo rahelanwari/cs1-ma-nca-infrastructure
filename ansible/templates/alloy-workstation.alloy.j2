@@ -1,10 +1,11 @@
-// Alloy on ws01 - reads the auth log and sends it to Loki on mgmt01
+// Alloy on {{ inventory_hostname }} - reads the auth log and sends it to Loki on mgmt01
+// (template: the same file for every workstation in the inventory)
 
 local.file_match "auth" {
   path_targets = [{
     "__path__" = "/var/log/auth.log",
     "job"      = "auth",
-    "host"     = "ws01",
+    "host"     = "{{ inventory_hostname }}",
   }]
 }
 

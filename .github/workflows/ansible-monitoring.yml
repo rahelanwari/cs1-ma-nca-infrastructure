@@ -10,8 +10,9 @@ on:
     branches: [main]
     paths:
       - "ansible/monitoring.yml"
+      - "ansible/inventory.ini"
       - "ansible/files/**"
-  workflow_dispatch:
+      - "ansible/templates/**"
 
 jobs:
   deploy:

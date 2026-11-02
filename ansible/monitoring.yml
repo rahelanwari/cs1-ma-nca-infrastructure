@@ -2,9 +2,11 @@
 # LOG COLLECTION IN NETLAB (block 5)
 # mgmt01: Loki (log storage), rsyslog (receives the firewall log of
 #         fw01 on UDP 514) and Alloy (sends that log to Loki)
-#         soar-ban (the SOAR may ban an IP on ws01 via this script)
-# ws01:   Alloy (sends /var/log/auth.log to Loki on mgmt01) and
+#         soar-ban (the SOAR may ban an IP on all workstations via this script)
+# workstations (ws01, ws02, ... = the group in inventory.ini):
+#         Alloy (sends /var/log/auth.log to Loki on mgmt01) and
 #         fail2ban (bans an IP for 5 minutes when the SOAR asks for it)
+# A new workstation only needs one line in inventory.ini.
 # Run:    ansible-playbook monitoring.yml   (or the pipeline)
 # =====================================================================
 
@@ -107,13 +109,14 @@
         name: alloy
         state: restarted
 
-- name: Auth log of ws01 to Loki
+- name: Auth log of every workstation to Loki
   hosts: workstations
   become: true
   tasks:
+    # One template for all workstations: the host label is the name in the inventory
     - name: Alloy configuration (auth.log to Loki)
-      ansible.builtin.copy:
-        src: files/alloy-ws01.alloy
+      ansible.builtin.template:
+        src: templates/alloy-workstation.alloy.j2
         dest: /etc/alloy/config.alloy
         mode: "0644"
       notify: Restart alloy
@@ -129,14 +132,14 @@
       ansible.builtin.systemd:
         name: alloy
         state: restarted
-   
+
 # =====================================================================
-# FAIL2BAN ON WS01 (SOAR block action)
+# FAIL2BAN ON EVERY WORKSTATION (SOAR block action)
 # fail2ban is only the ban tool: it never bans by itself (maxretry is
 # very high). The SOAR decides and asks for a ban via mgmt01.
 # A ban lasts 5 minutes and is removed automatically.
 # =====================================================================
-- name: fail2ban on ws01 (ban tool for the SOAR)
+- name: fail2ban on every workstation (ban tool for the SOAR)
   hosts: workstations
   become: true
   tasks:
@@ -169,16 +172,30 @@
       ansible.builtin.systemd:
         name: fail2ban
         state: restarted
-        
+
 # =====================================================================
 # SOAR BAN SCRIPT ON MGMT01 (SOAR block action)
 # The SOAR key may ONLY run soar-ban (forced command), and only from
 # the AWS app subnets where the SOAR tasks run (from=).
+# soar-ban bans on all workstations in /etc/soar/inventory.ini, a copy
+# of inventory.ini, so the script always knows every workstation.
 # =====================================================================
 - name: SOAR ban script on mgmt01
   hosts: management
   become: true
   tasks:
+    - name: Make the folder for the SOAR inventory
+      ansible.builtin.file:
+        path: /etc/soar
+        state: directory
+        mode: "0755"
+
+    - name: Copy the inventory, so soar-ban knows all workstations
+      ansible.builtin.copy:
+        src: inventory.ini
+        dest: /etc/soar/inventory.ini
+        mode: "0644"
+
     - name: Install the ban script
       ansible.builtin.copy:
         src: files/soar-ban.sh
@@ -193,3 +210,10 @@
         key: "{{ lookup('file', 'files/soar_ban.pub') }}"
         key_options: 'from="10.0.10.0/23",command="/usr/local/bin/soar-ban",no-port-forwarding,no-agent-forwarding,no-X11-forwarding,no-pty'
         state: present
+
+    # The MariaDB client, to read the ban history in the database (bans table)
+    - name: Install the MariaDB client
+      ansible.builtin.apt:
+        name: mariadb-client
+        state: present
+        update_cache: true
