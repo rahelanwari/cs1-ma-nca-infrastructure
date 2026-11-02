@@ -98,3 +98,15 @@ resource "aws_security_group_rule" "db_ssh_from_netlab" {
   cidr_blocks       = [var.onprem_mgmt_cidr]
   security_group_id = var.db_security_group_id
 }
+
+# mgmt01 may read the SOAR ban history in MariaDB (port 3306), only through
+# the VPN and only from mgmt01 itself (the user soar_reader is bound to it too).
+resource "aws_security_group_rule" "db_mysql_from_mgmt01" {
+  type              = "ingress"
+  description       = "MariaDB from mgmt01 (read the SOAR ban history) via VPN"
+  from_port         = 3306
+  to_port           = 3306
+  protocol          = "tcp"
+  cidr_blocks       = ["${var.mgmt01_ip}/32"]
+  security_group_id = var.db_security_group_id
+}

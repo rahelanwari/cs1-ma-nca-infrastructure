@@ -43,3 +43,17 @@ variable "root_volume_size" {
   type        = number
   default     = 30
 }
+
+# ---------------------------------------------------------------- SOAR ban history (CS2)
+
+variable "soar_writer_host" {
+  description = "Where the SOAR may log in from as soar_writer: the AWS app subnets 10.0.10.0/23 (MariaDB netmask notation)"
+  type        = string
+  default     = "10.0.10.0/255.255.254.0"
+}
+
+variable "soar_reader_host" {
+  description = "Where soar_reader may log in from: mgmt01 in NetLab (through the VPN)"
+  type        = string
+  default     = "192.168.20.10"
+}

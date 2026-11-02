@@ -1,8 +1,9 @@
 # =====================================================================
 # SOAR module (CS2 block 6): Python SOAR service on ECS Fargate
 # Grafana sends alerts to POST /alerts on port 8080; the SOAR stores
-# incidents in S3 (A1), sends e-mails via SNS (A2) and bans the attacker
-# on ws01 for 5 minutes via mgmt01 (A3, over the VPN).
+# incidents in S3 (A1), sends e-mails via SNS (A2), bans the attacker
+# on all workstations for 5 minutes via mgmt01 (A3, over the VPN) and
+# writes every ban to the ban history in MariaDB (A4).
 # =====================================================================
 
 locals {
@@ -74,7 +75,7 @@ resource "aws_security_group" "soar" {
   }
 
   egress {
-    description = "S3, SNS, ECR over HTTPS (NAT) and SSH to mgmt01 (VPN, ban script)"
+    description = "S3, SNS, ECR over HTTPS (NAT), SSH to mgmt01 (VPN, ban script) and MariaDB (ban history)"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
@@ -84,6 +85,17 @@ resource "aws_security_group" "soar" {
   tags = merge(local.common_tags, {
     Name = "${local.name_prefix}-soar-sg"
   })
+}
+
+# A4 record_ban: the database server accepts the SOAR tasks on port 3306
+resource "aws_security_group_rule" "db_from_soar" {
+  type                     = "ingress"
+  description              = "MariaDB from the SOAR (ban history, A4 record_ban)"
+  from_port                = 3306
+  to_port                  = 3306
+  protocol                 = "tcp"
+  security_group_id        = var.db_security_group_id
+  source_security_group_id = aws_security_group.soar.id
 }
 
 # ---------------------------------------------------------------- permissions
@@ -126,9 +138,10 @@ resource "aws_secretsmanager_secret_version" "block_key" {
   secret_string = var.block_ssh_private_key
 }
 
-# The execution role may read this one secret, so ECS can give it to the container
-resource "aws_iam_role_policy" "execution_block_key" {
-  name = "${local.name_prefix}-soar-read-block-key"
+# The execution role may read only these two secrets, so ECS can give them to the
+# container: the SSH key (A3) and the password of soar_writer (A4, database module)
+resource "aws_iam_role_policy" "execution_secrets" {
+  name = "${local.name_prefix}-soar-read-secrets"
   role = aws_iam_role.execution.id
 
   policy = jsonencode({
@@ -139,6 +152,12 @@ resource "aws_iam_role_policy" "execution_block_key" {
         Effect   = "Allow"
         Action   = ["secretsmanager:GetSecretValue"]
         Resource = aws_secretsmanager_secret.block_key.arn
+      },
+      {
+        Sid      = "ReadBanDbPassword"
+        Effect   = "Allow"
+        Action   = ["secretsmanager:GetSecretValue"]
+        Resource = var.ban_db_password_secret_arn
       }
     ]
   })
@@ -237,12 +256,17 @@ resource "aws_ecs_task_definition" "soar" {
         { name = "AWS_REGION", value = data.aws_region.current.name },
         { name = "BLOCK_HOST", value = var.block_host },
         { name = "BLOCK_USER", value = "student" },
-        { name = "BLOCK_HOST_KEY", value = var.block_host_key }
+        { name = "BLOCK_HOST_KEY", value = var.block_host_key },
+        { name = "BAN_DB_HOST", value = var.ban_db_host },
+        { name = "BAN_DB_NAME", value = "soar" },
+        { name = "BAN_DB_USER", value = "soar_writer" }
       ]
 
-      # A3 block_ip: ECS reads the private key from Secrets Manager at start-up
+      # ECS reads these from Secrets Manager at start-up: the private key (A3 block_ip)
+      # and the password of the database user soar_writer (A4 record_ban)
       secrets = [
-        { name = "BLOCK_SSH_KEY", valueFrom = aws_secretsmanager_secret.block_key.arn }
+        { name = "BLOCK_SSH_KEY", valueFrom = aws_secretsmanager_secret.block_key.arn },
+        { name = "BAN_DB_PASSWORD", valueFrom = var.ban_db_password_secret_arn }
       ]
 
       # ECS replaces a task that stops answering on /health
@@ -287,7 +311,7 @@ resource "aws_ecs_service" "soar" {
 
   depends_on = [
     aws_iam_role_policy_attachment.execution,
-    aws_iam_role_policy.execution_block_key,
+    aws_iam_role_policy.execution_secrets,
     aws_secretsmanager_secret_version.block_key
   ]
 

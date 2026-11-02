@@ -7,7 +7,7 @@ groups:
     folder: Innovatech Alerts
     interval: 1m
     rules:
-      # R1 - one or more failed SSH logins on ws01 in 5 minutes
+      # R1 - one or more failed SSH logins on a workstation in 5 minutes
       - uid: r1-ssh-failed-login
         title: R1 Failed SSH login
         condition: C
@@ -152,7 +152,9 @@ groups:
           source: cloud
           host: aws-vpn
 
-      # R5 - no log lines from ws01 or fw01 for 15 minutes
+      # R5 - a log source is silent for 15 minutes: a workstation that sent its auth
+      # log in the last 24 hours but nothing in the last 15 minutes, or fw01.
+      # A new workstation is watched automatically: there is no list to update.
       - uid: r5-log-source-silent
         title: R5 Log source silent
         condition: C
@@ -164,7 +166,7 @@ groups:
               refId: A
               editorMode: code
               queryType: instant
-              expr: 'absent_over_time({host="ws01"}[15m]) or absent_over_time({host="fw01"}[15m])'
+              expr: '(sum by (host) (count_over_time({job="auth"}[24h])) unless sum by (host) (count_over_time({job="auth"}[15m]))) or absent_over_time({host="fw01"}[15m])'
           - refId: C
             datasourceUid: __expr__
             model:

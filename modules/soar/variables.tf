@@ -88,3 +88,20 @@ variable "block_host_key" {
   description = "Public ed25519 host key of mgmt01 (base64 part), so the SOAR only trusts the real mgmt01"
   type        = string
 }
+
+# ---------------------------------------------------------------- action A4 record_ban
+
+variable "db_security_group_id" {
+  description = "Security group of the database server; it gets a rule for port 3306 from the SOAR"
+  type        = string
+}
+
+variable "ban_db_host" {
+  description = "Private IP of the database server with the ban history (database soar)"
+  type        = string
+}
+
+variable "ban_db_password_secret_arn" {
+  description = "Secrets Manager secret with the password of the database user soar_writer"
+  type        = string
+}

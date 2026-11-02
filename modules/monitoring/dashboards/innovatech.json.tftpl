@@ -142,12 +142,12 @@
       "id": 104,
       "type": "timeseries",
       "title": "Log Lines Received (per minute)",
-      "description": "Log lines per minute that Loki receives from ws01 (auth log) and fw01 (firewall log). A line at 0 means a log source is silent (alert R5).",
+      "description": "Log lines per minute that Loki receives from every workstation (auth log) and fw01 (firewall log). A line at 0 means a log source is silent (alert R5).",
       "datasource": {"type": "loki", "uid": "loki"},
       "gridPos": {"x": 18, "y": 25, "w": 6, "h": 8},
       "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 15, "showPoints": "never", "spanNulls": false, "thresholdsStyle": {"mode": "off"}}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]}, "decimals": 0, "min": 0}, "overrides": []},
       "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi"}},
-      "targets": [{"refId": "A", "datasource": {"type": "loki", "uid": "loki"}, "editorMode": "code", "expr": "sum by (host) (count_over_time({host=~\"ws01|fw01\"}[1m]))", "queryType": "range", "legendFormat": "{{host}}"}]
+      "targets": [{"refId": "A", "datasource": {"type": "loki", "uid": "loki"}, "editorMode": "code", "expr": "sum by (host) (count_over_time({job=~\"auth|firewall\"}[1m]))", "queryType": "range", "legendFormat": "{{host}}"}]
     },
     {
       "id": 110,
@@ -160,8 +160,8 @@
     {
       "id": 111,
       "type": "timeseries",
-      "title": "Failed SSH Logins (per 5 min, ws01)",
-      "description": "Failed SSH logins on ws01 in the last 5 minutes. 1 or more fires alert R1, 5 or more from one IP fires alert R2.",
+      "title": "Failed SSH Logins (per 5 min, per workstation)",
+      "description": "Failed SSH logins per workstation in the last 5 minutes. 1 or more fires alert R1, 5 or more from one IP fires alert R2.",
       "datasource": {"type": "loki", "uid": "loki"},
       "gridPos": {"x": 0, "y": 34, "w": 8, "h": 8},
       "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 15, "showPoints": "never", "spanNulls": false, "thresholdsStyle": {"mode": "off"}}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]}, "decimals": 0, "min": 0, "noValue": "0"}, "overrides": []},
@@ -194,12 +194,12 @@
     {
       "id": 114,
       "type": "logs",
-      "title": "Latest Log Lines (ws01 + fw01)",
-      "description": "The newest log lines from the auth log of ws01 and the firewall log of fw01, live from Loki.",
+      "title": "Latest Log Lines (workstations + fw01)",
+      "description": "The newest log lines from the auth log of every workstation and the firewall log of fw01, live from Loki.",
       "datasource": {"type": "loki", "uid": "loki"},
       "gridPos": {"x": 0, "y": 42, "w": 24, "h": 10},
       "options": {"showTime": true, "showLabels": false, "showCommonLabels": false, "wrapLogMessage": true, "prettifyLogMessage": false, "enableLogDetails": true, "dedupStrategy": "none", "sortOrder": "Descending"},
-      "targets": [{"refId": "A", "datasource": {"type": "loki", "uid": "loki"}, "editorMode": "code", "expr": "{host=~\"ws01|fw01\"}", "queryType": "range"}]
+      "targets": [{"refId": "A", "datasource": {"type": "loki", "uid": "loki"}, "editorMode": "code", "expr": "{job=~\"auth|firewall\"}", "queryType": "range"}]
     },
     {
       "id": 120,

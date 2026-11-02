@@ -95,4 +95,9 @@ module "soar" {
 
   block_ssh_private_key = var.soar_ssh_private_key
   block_host_key        = var.mgmt01_host_key
+
+  # A4 record_ban: the ban history in MariaDB
+  db_security_group_id       = module.network.db_security_group_id
+  ban_db_host                = module.database.db_address
+  ban_db_password_secret_arn = module.database.soar_writer_secret_arn
 }

@@ -24,3 +24,13 @@ output "secret_arn" {
   description = "ARN of the Secrets Manager secret holding the DB credentials"
   value       = aws_secretsmanager_secret.db_credentials.arn
 }
+
+output "soar_writer_secret_arn" {
+  description = "Secret with the password of soar_writer (the SOAR writes the ban history)"
+  value       = aws_secretsmanager_secret.soar_writer.arn
+}
+
+output "soar_reader_secret_name" {
+  description = "Secret with the password of soar_reader (read the ban history from mgmt01)"
+  value       = aws_secretsmanager_secret.soar_reader.name
+}

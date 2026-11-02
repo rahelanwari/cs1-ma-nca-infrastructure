@@ -119,3 +119,8 @@ output "soar_url" {
   description = "Webhook URL of the SOAR (Grafana contact point)"
   value       = module.soar.soar_url
 }
+
+output "soar_db_reader_secret" {
+  description = "Secret with the password of soar_reader, to read the ban history from mgmt01"
+  value       = module.database.soar_reader_secret_name
+}

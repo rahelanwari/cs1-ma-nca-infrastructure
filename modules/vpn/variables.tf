@@ -53,3 +53,9 @@ variable "tunnel2_preshared_key" {
   type        = string
   sensitive   = true
 }
+
+variable "mgmt01_ip" {
+  description = "mgmt01 in NetLab; may read the SOAR ban history in the database (port 3306)"
+  type        = string
+  default     = "192.168.20.10"
+}
