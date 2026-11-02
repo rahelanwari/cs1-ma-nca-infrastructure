@@ -1,16 +1,20 @@
 """Tests for the SOAR: rule engine, actions and the HTTP endpoints.
 
-AWS is replaced by fake clients, so the tests never send e-mails or write to S3.
+AWS, mgmt01 and the database are replaced by fake clients, so the tests never
+send e-mails, write to S3, ban an IP or write to MariaDB.
 """
 
 import copy
 import json
 import os
+import sys
+import types
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from prometheus_client import CollectorRegistry
 
-from actions import Actions
+from actions import Actions, BanRecorder, ban_from_result
 from app import DEFAULT_RULES, create_app
 from engine import actions_for, load_rules, normalize_alert, tier_for
 
@@ -41,22 +45,37 @@ class FakeSNS:
 class FakeBlocker:
     """Stands in for the SSH connection to mgmt01 (action A3 block_ip)."""
 
-    def __init__(self, fail=False):
+    def __init__(self, fail=False, answer=None):
         self.banned = []
         self.fail = fail
+        self.answer = answer  # a different answer of the ban script (for example PARTIAL)
 
     def ban(self, ip):
         if self.fail:
-            raise RuntimeError("mgmt01 is not reachable")
+            raise RuntimeError(self.answer or "mgmt01 is not reachable")
         self.banned.append(ip)
-        return f"BANNED: {ip} on ws01 for 5 minutes"
+        return self.answer or f"BANNED: {ip} on ws01,ws02 for 5 minutes"
 
 
-def make_client(s3_fails=False, blocker=None):
+class FakeRecorder:
+    """Stands in for the ban history in MariaDB (action A4 record_ban)."""
+
+    def __init__(self, fail=False):
+        self.bans = []
+        self.fail = fail
+
+    def save(self, ban):
+        if self.fail:
+            raise RuntimeError("the database is not reachable")
+        self.bans.append(ban)
+        return len(self.bans)
+
+
+def make_client(s3_fails=False, blocker=None, recorder=None):
     """A test client of the SOAR with fake AWS clients and its own metrics."""
     s3, sns = FakeS3(fail=s3_fails), FakeSNS()
     actions = Actions(s3=s3, sns=sns, bucket="test-bucket", topic_arn="arn:aws:sns:eu-west-1:123:test",
-                      blocker=blocker or FakeBlocker())
+                      blocker=blocker or FakeBlocker(), recorder=recorder or FakeRecorder())
     app = create_app(rules=load_rules(DEFAULT_RULES), actions=actions, registry=CollectorRegistry())
     return app.test_client(), s3, sns
 
@@ -82,6 +101,14 @@ def test_rules_file_is_valid_and_covers_all_alert_rules():
 def test_unknown_action_in_rules_file_is_rejected(tmp_path):
     bad = tmp_path / "rules.yaml"
     bad.write_text("rules:\n  - type: x\n    actions: [send_sms]\ndefault:\n  actions: [notify]\n")
+    with pytest.raises(ValueError):
+        load_rules(str(bad))
+
+
+def test_record_ban_before_block_ip_is_rejected(tmp_path):
+    bad = tmp_path / "rules.yaml"
+    bad.write_text("rules:\n  - type: x\n    actions: [record_ban, block_ip]\n"
+                   "default:\n  actions: [notify]\n")
     with pytest.raises(ValueError):
         load_rules(str(bad))
 
@@ -199,22 +226,25 @@ def test_health():
 
 # ---------------------------------------------------------------- block action (A3)
 
-def test_brute_force_blocks_the_attacker():
+@pytest.mark.parametrize("host", ["ws01", "ws02"])
+def test_brute_force_blocks_the_attacker_on_all_workstations(host):
     blocker = FakeBlocker()
     client, s3, sns = make_client(blocker=blocker)
-    client.post("/alerts", json=webhook("ssh_brute_force", "medium", src_ip="192.168.10.66"))
+    client.post("/alerts", json=webhook("ssh_brute_force", "medium", host=host, src_ip="192.168.10.66"))
     assert blocker.banned == ["192.168.10.66"]
     assert len(sns.messages) == 1
 
     record = json.loads(s3.objects[0]["Body"])
     assert record["actions"][0] == {"action": "block_ip", "result": "success",
-                                    "detail": "BANNED: 192.168.10.66 on ws01 for 5 minutes"}
+                                    "detail": "BANNED: 192.168.10.66 on ws01,ws02 for 5 minutes"}
 
 
-def test_whitelisted_ip_is_never_blocked():
+# mgmt01, fw01, ws02 and the last address of the reserved workstation range
+@pytest.mark.parametrize("ip", ["192.168.20.10", "192.168.10.1", "192.168.10.11", "192.168.10.31"])
+def test_whitelisted_ip_is_never_blocked(ip):
     blocker = FakeBlocker()
     client, _, sns = make_client(blocker=blocker)
-    client.post("/alerts", json=SAMPLE)  # src_ip 192.168.20.10 is mgmt01
+    client.post("/alerts", json=webhook("ssh_brute_force", "medium", src_ip=ip))
     assert blocker.banned == []
     assert len(sns.messages) == 1  # the e-mail is still sent
 
@@ -238,3 +268,124 @@ def test_failed_block_still_sends_the_email():
     record = json.loads(s3.objects[0]["Body"])
     assert record["actions"][0]["action"] == "block_ip"
     assert record["actions"][0]["result"] == "failed"
+
+
+# ---------------------------------------------------------------- ban history (A4)
+
+def test_ban_is_recorded_with_all_workstations():
+    recorder = FakeRecorder()
+    client, s3, _ = make_client(recorder=recorder)
+    client.post("/alerts", json=webhook("ssh_brute_force", "medium", host="ws02", src_ip="192.168.10.66"))
+
+    ban = recorder.bans[0]
+    assert ban["status"] == "BANNED"
+    assert ban["src_ip"] == "192.168.10.66"
+    assert ban["alert_host"] == "ws02"
+    assert ban["targets"] == [("ws01", "banned"), ("ws02", "banned")]
+    assert ban["expires_at"] - ban["banned_at"] == timedelta(minutes=5)
+
+    # The ban and the incident in S3 have the same event id, so they can be linked
+    record = json.loads(s3.objects[0]["Body"])
+    assert ban["event_id"] == record["id"]
+    assert [a["action"] for a in record["actions"]] == ["block_ip", "record_ban", "notify"]
+    assert record["actions"][1] == {"action": "record_ban", "result": "success",
+                                    "detail": "ban 1 recorded: BANNED 192.168.10.66"}
+
+
+def test_partial_ban_is_recorded_per_workstation():
+    recorder = FakeRecorder()
+    blocker = FakeBlocker(fail=True, answer="PARTIAL: 192.168.10.66 banned on ws01; failed on ws02")
+    client, _, _ = make_client(blocker=blocker, recorder=recorder)
+    client.post("/alerts", json=webhook("ssh_brute_force", "medium", src_ip="192.168.10.66"))
+
+    ban = recorder.bans[0]
+    assert ban["status"] == "PARTIAL"
+    assert ban["targets"] == [("ws01", "banned"), ("ws02", "failed")]
+    metrics = client.get("/metrics").get_data(as_text=True)
+    assert has_sample(metrics, "soar_actions_total", "1.0", action="block_ip", result="failed")
+
+
+def test_failed_block_is_recorded_without_workstations():
+    recorder = FakeRecorder()
+    client, _, _ = make_client(recorder=recorder)
+    client.post("/alerts", json=SAMPLE)  # src_ip 192.168.20.10 (mgmt01) is on the whitelist
+
+    ban = recorder.bans[0]
+    assert ban["status"] == "FAILED"
+    assert ban["targets"] == []
+    assert ban["expires_at"] is None
+    assert "whitelist" in ban["detail"]
+
+
+def test_ban_result_text_is_parsed():
+    event = normalize_alert(webhook("ssh_brute_force", "medium", src_ip="192.168.10.66")["alerts"][0])
+    now = datetime(2026, 11, 2, 16, 8, 53, tzinfo=UTC)
+    ban = ban_from_result(event, {"action": "block_ip", "result": "success",
+                                  "detail": "BANNED: 192.168.10.66 on ws01,ws02,ws03 for 5 minutes"}, now)
+    assert ban["targets"] == [("ws01", "banned"), ("ws02", "banned"), ("ws03", "banned")]
+    assert str(ban["banned_at"]) == "2026-11-02 16:08:53"  # UTC
+    assert str(ban["expires_at"]) == "2026-11-02 16:13:53"
+
+
+def test_failed_database_still_sends_the_email_and_stores_the_incident():
+    client, s3, sns = make_client(recorder=FakeRecorder(fail=True))
+    client.post("/alerts", json=webhook("ssh_brute_force", "medium", src_ip="192.168.10.66"))
+    assert len(sns.messages) == 1
+    record = json.loads(s3.objects[0]["Body"])
+    assert record["actions"][1]["action"] == "record_ban"
+    assert record["actions"][1]["result"] == "failed"
+
+    metrics = client.get("/metrics").get_data(as_text=True)
+    assert has_sample(metrics, "soar_actions_total", "1.0", action="record_ban", result="failed")
+
+
+class FakeCursor:
+    def __init__(self, statements):
+        self.statements = statements
+        self.lastrowid = 7
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def execute(self, sql, params):
+        self.statements.append((sql, params))
+
+    def executemany(self, sql, rows):
+        self.statements.extend((sql, row) for row in rows)
+
+
+class FakeConnection:
+    """Stands in for a PyMySQL connection to MariaDB."""
+
+    def __init__(self):
+        self.statements = []
+        self.committed = False
+        self.closed = False
+
+    def cursor(self):
+        return FakeCursor(self.statements)
+
+    def commit(self):
+        self.committed = True
+
+    def close(self):
+        self.closed = True
+
+
+def test_ban_recorder_writes_both_tables_in_one_transaction(monkeypatch):
+    connection = FakeConnection()
+    monkeypatch.setitem(sys.modules, "pymysql", types.SimpleNamespace(connect=lambda **kwargs: connection))
+    event = normalize_alert(webhook("ssh_brute_force", "medium", src_ip="192.168.10.66")["alerts"][0])
+    ban = ban_from_result(event, {"action": "block_ip", "result": "success",
+                                  "detail": "BANNED: 192.168.10.66 on ws01,ws02 for 5 minutes"})
+
+    assert BanRecorder("db", "soar_writer", "secret").save(ban) == 7
+    assert connection.committed and connection.closed
+    tables = [sql.split()[2] for sql, _ in connection.statements]
+    assert tables == ["bans", "ban_targets", "ban_targets"]
+    assert connection.statements[2][1] == (7, "ws02", "banned")
+    for sql, params in connection.statements:
+        assert sql.count("%s") == len(params)  # every value is a parameter, never part of the SQL text

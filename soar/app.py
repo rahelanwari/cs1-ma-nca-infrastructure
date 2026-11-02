@@ -18,7 +18,7 @@ from prometheus_client import (
     generate_latest,
 )
 
-from actions import Actions, SshBlocker
+from actions import Actions, BanRecorder, SshBlocker
 from engine import (
     KNOWN_ACTIONS,
     SOURCES,
@@ -53,9 +53,17 @@ def actions_from_env():
                              private_key=os.environ["BLOCK_SSH_KEY"],
                              host_key=os.environ["BLOCK_HOST_KEY"])
 
+    # A4 record_ban: only when the ban database is configured
+    recorder = None
+    if os.environ.get("BAN_DB_HOST"):
+        recorder = BanRecorder(host=os.environ["BAN_DB_HOST"],
+                               user=os.environ.get("BAN_DB_USER", "soar_writer"),
+                               password=os.environ["BAN_DB_PASSWORD"],
+                               database=os.environ.get("BAN_DB_NAME", "soar"))
+
     return Actions(s3=boto3.client("s3", region_name=region),
                    sns=boto3.client("sns", region_name=region),
-                   bucket=bucket, topic_arn=topic_arn, blocker=blocker)
+                   bucket=bucket, topic_arn=topic_arn, blocker=blocker, recorder=recorder)
 
 
 def create_app(rules=None, actions=None, registry=None):
@@ -109,8 +117,14 @@ def create_app(rules=None, actions=None, registry=None):
         log.info("event type=%s tier=%s host=%s actions=%s",
                  event["type"], event["tier"], event["host"], planned)
 
-        # Other actions first, so the incident record also contains their results
-        results = [run(name, getattr(actions, name), event) for name in planned if name != "log_incident"]
+        # Other actions first, in the order of rules.yaml, so the incident record also
+        # contains their results. record_ban gets the results so far (it needs block_ip).
+        results = []
+        for name in planned:
+            if name == "log_incident":
+                continue
+            args = (event, results) if name == "record_ban" else (event,)
+            results.append(run(name, getattr(actions, name), *args))
         if "log_incident" in planned:
             results.append(run("log_incident", actions.log_incident, event, results))
         duration.observe(time.perf_counter() - start)

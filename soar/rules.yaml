@@ -5,7 +5,8 @@
 # Actions:
 #   log_incident  A1 - store the incident as a JSON file in S3
 #   notify        A2 - send an e-mail to the IT staff via SNS
-#   block_ip      A3 - ban the source IP on ws01 for 5 minutes (via mgmt01)
+#   block_ip      A3 - ban the source IP on all workstations for 5 minutes (via mgmt01)
+#   record_ban    A4 - write the ban to the ban history in MariaDB (after block_ip)
 #
 # Add a rule: add one entry below and push. The pipeline tests and deploys it.
 
@@ -14,7 +15,7 @@ rules:
     actions: [log_incident]
 
   - type: ssh_brute_force         # R2 - tier medium: block the attacker
-    actions: [block_ip, notify, log_incident]
+    actions: [block_ip, record_ban, notify, log_incident]
 
   - type: port_scan               # R3 - tier high: e-mail subject CRITICAL
     actions: [log_incident, notify]

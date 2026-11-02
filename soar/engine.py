@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 
 import yaml
 
-KNOWN_ACTIONS = {"log_incident", "notify", "block_ip"}
+KNOWN_ACTIONS = {"log_incident", "notify", "block_ip", "record_ban"}
 
 # Severity label of the alert -> response tier (Phase 1 design, 6.3)
 TIERS = {"low": "LOW", "medium": "MEDIUM", "high": "CRITICAL"}
@@ -35,6 +35,13 @@ def load_rules(path):
             raise ValueError(f"Unknown action(s) in rules file: {sorted(unknown)}")
     if not default:
         raise ValueError("The rules file needs a default rule with at least one action")
+
+    # record_ban stores the result of block_ip, so block_ip must run before it
+    for actions in list(rules.values()) + [default]:
+        if "record_ban" in actions and (
+            "block_ip" not in actions or actions.index("block_ip") > actions.index("record_ban")
+        ):
+            raise ValueError("record_ban needs block_ip before it in the same rule")
 
     return {"rules": rules, "default": default}
 
