@@ -124,3 +124,8 @@ output "soar_db_reader_secret" {
   description = "Secret with the password of soar_reader, to read the ban history from mgmt01"
   value       = module.database.soar_reader_secret_name
 }
+
+output "website_url" {
+  description = "HTTPS address of the web app (self-signed certificate: the browser shows a warning)"
+  value       = "https://${module.compute.alb_dns_name}"
+}

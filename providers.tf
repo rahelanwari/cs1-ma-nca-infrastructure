@@ -10,6 +10,11 @@ terraform {
       source  = "hashicorp/random"
       version = "~> 3.6"
     }
+    # Makes the self-signed certificate for HTTPS on the load balancer
+    tls = {
+      source  = "hashicorp/tls"
+      version = "~> 4.0"
+    }
   }
 
   # Absolute path, so the laptop and the pipeline runner use the SAME state file.

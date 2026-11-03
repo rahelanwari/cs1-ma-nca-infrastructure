@@ -136,14 +136,74 @@ resource "aws_lb_target_group" "nginx" {
   tags = local.common_tags
 }
 
+# ---------------------------------------------------------------- HTTPS
+# Self-signed certificate for the load balancer. A trusted certificate from
+# ACM needs a domain name of our own; the ALB address (*.elb.amazonaws.com)
+# belongs to Amazon. The connection is encrypted, but the browser shows a
+# warning, because nobody vouches for this certificate.
+resource "tls_private_key" "alb" {
+  algorithm = "RSA"
+  rsa_bits  = 2048
+}
+
+resource "tls_self_signed_cert" "alb" {
+  private_key_pem = tls_private_key.alb.private_key_pem
+
+  subject {
+    common_name  = "Innovatech web app (self-signed)"
+    organization = "Innovatech Solutions"
+  }
+
+  dns_names             = [aws_lb.main.dns_name] # the address users type in the browser
+  validity_period_hours = 8760                   # 1 year
+  early_renewal_hours   = 720                    # Terraform makes a new one 30 days before it expires
+  allowed_uses          = ["key_encipherment", "digital_signature", "server_auth"]
+}
+
+# ACM stores the certificate, so the load balancer can use it
+resource "aws_acm_certificate" "alb" {
+  private_key      = tls_private_key.alb.private_key_pem
+  certificate_body = tls_self_signed_cert.alb.cert_pem
+
+  tags = merge(local.common_tags, {
+    Name = "${local.name_prefix}-alb-cert"
+  })
+
+  # A new certificate is made first, then the old one is removed (no downtime)
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+# HTTPS on port 443: the ALB decrypts the traffic (TLS offloading) and sends it
+# to the containers over HTTP, inside the private VPC
+resource "aws_lb_listener" "https" {
+  load_balancer_arn = aws_lb.main.arn
+  port              = 443
+  protocol          = "HTTPS"
+  ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-2021-06" # only TLS 1.2 and 1.3
+  certificate_arn   = aws_acm_certificate.alb.arn
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.nginx.arn
+  }
+}
+
+# HTTP on port 80 only sends visitors on to HTTPS (permanent redirect)
 resource "aws_lb_listener" "http" {
   load_balancer_arn = aws_lb.main.arn
   port              = 80
   protocol          = "HTTP"
 
   default_action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.nginx.arn
+    type = "redirect"
+
+    redirect {
+      port        = "443"
+      protocol    = "HTTPS"
+      status_code = "HTTP_301"
+    }
   }
 }
 
@@ -169,7 +229,8 @@ resource "aws_ecs_service" "nginx" {
   deployment_minimum_healthy_percent = 100
   deployment_maximum_percent         = 200
 
-  depends_on = [aws_lb_listener.http, aws_iam_role_policy_attachment.ecs_task_execution]
+  # The target group is used by the HTTPS listener, so that listener must exist first
+  depends_on = [aws_lb_listener.https, aws_iam_role_policy_attachment.ecs_task_execution]
 
   tags = local.common_tags
 }
