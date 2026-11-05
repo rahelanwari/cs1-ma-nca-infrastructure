@@ -259,3 +259,104 @@ resource "aws_appautoscaling_policy" "cpu" {
     scale_out_cooldown = 60
   }
 }
+# ---------------------------------------------------------------- ACCEPTANCE (Flavor C)
+# A second, small copy of the web app on the same load balancer, on port 8443.
+# The pipeline deploys every new version here first (image tag "acc").
+# Production (port 443, image tag "latest") only gets the version after my approval.
+
+resource "aws_lb_target_group" "nginx_acc" {
+  name        = "${local.name_prefix}-nginx-acc-tg"
+  port        = var.container_port
+  protocol    = "HTTP"
+  vpc_id      = var.vpc_id
+  target_type = "ip"
+
+  health_check {
+    path                = "/"
+    matcher             = "200"
+    interval            = 30
+    timeout             = 5
+    healthy_threshold   = 2
+    unhealthy_threshold = 3
+  }
+
+  tags = local.common_tags
+}
+
+# HTTPS on port 8443 with the same certificate and TLS policy as production
+resource "aws_lb_listener" "https_acc" {
+  load_balancer_arn = aws_lb.main.arn
+  port              = 8443
+  protocol          = "HTTPS"
+  ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-2021-06"
+  certificate_arn   = aws_acm_certificate.alb.arn
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.nginx_acc.arn
+  }
+}
+
+resource "aws_ecs_task_definition" "nginx_acc" {
+  family                   = "${local.name_prefix}-nginx-acc"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = var.task_cpu
+  memory                   = var.task_memory
+  execution_role_arn       = aws_iam_role.ecs_task_execution.arn
+  task_role_arn            = aws_iam_role.ecs_task.arn
+
+  container_definitions = jsonencode([
+    {
+      name      = "nginx"
+      image     = "${aws_ecr_repository.nginx.repository_url}:acc"
+      essential = true
+
+      portMappings = [
+        {
+          containerPort = var.container_port
+          protocol      = "tcp"
+        }
+      ]
+
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = aws_cloudwatch_log_group.nginx.name
+          "awslogs-region"        = data.aws_region.current.name
+          "awslogs-stream-prefix" = "nginx-acc"
+        }
+      }
+    }
+  ])
+
+  tags = local.common_tags
+}
+
+# One task is enough for acceptance: it is only used to check a new version
+resource "aws_ecs_service" "nginx_acc" {
+  name            = "${local.name_prefix}-nginx-acc-service"
+  cluster         = aws_ecs_cluster.main.id
+  task_definition = aws_ecs_task_definition.nginx_acc.arn
+  desired_count   = 1
+  launch_type     = "FARGATE"
+
+  network_configuration {
+    subnets          = var.app_subnet_ids
+    security_groups  = [var.app_security_group_id]
+    assign_public_ip = false
+  }
+
+  load_balancer {
+    target_group_arn = aws_lb_target_group.nginx_acc.arn
+    container_name   = "nginx"
+    container_port   = var.container_port
+  }
+
+  deployment_minimum_healthy_percent = 100
+  deployment_maximum_percent         = 200
+
+  depends_on = [aws_lb_listener.https_acc, aws_iam_role_policy_attachment.ecs_task_execution]
+
+  tags = local.common_tags
+}

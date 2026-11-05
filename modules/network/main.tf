@@ -163,6 +163,16 @@ resource "aws_security_group_rule" "alb_https" {
   description       = "HTTPS from internet"
 }
 
+resource "aws_security_group_rule" "alb_https_acc" {
+  type              = "ingress"
+  from_port         = 8443
+  to_port           = 8443
+  protocol          = "tcp"
+  security_group_id = aws_security_group.alb.id
+  cidr_blocks       = ["0.0.0.0/0"]
+  description       = "HTTPS to the acceptance environment"
+}
+
 resource "aws_security_group" "app" {
   name        = "${local.name_prefix}-app-sg"
   description = "Allows inbound traffic from the ALB only"

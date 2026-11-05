@@ -129,3 +129,8 @@ output "website_url" {
   description = "HTTPS address of the web app (self-signed certificate: the browser shows a warning)"
   value       = "https://${module.compute.alb_dns_name}"
 }
+
+output "acceptance_url" {
+  description = "HTTPS address of the acceptance environment (new versions land here first)"
+  value       = "https://${module.compute.alb_dns_name}:8443"
+}

@@ -7,7 +7,7 @@ on:
       - "app/**"
   workflow_dispatch:
 
-# Only one deployment at a time. A new run waits for the running one instead of cancelling it.
+# Only one release at a time. A new run waits for the running one (also while that one waits for approval).
 concurrency:
   group: deploy-app
   cancel-in-progress: false
@@ -17,7 +17,9 @@ env:
   AWS_REGION: eu-west-1
   ECR_REPOSITORY: innovatech-cs1-dev-nginx
   ECS_CLUSTER: innovatech-cs1-dev-cluster
-  ECS_SERVICE: innovatech-cs1-dev-nginx-service
+  ECS_SERVICE_ACC: innovatech-cs1-dev-nginx-acc-service   # acceptance: runs image tag "acc", https://<alb>:8443
+  ECS_SERVICE_PROD: innovatech-cs1-dev-nginx-service      # production: runs image tag "latest", https://<alb>
+  ALB_NAME: innovatech-cs1-dev-alb
   IMAGE_TAG: ${{ github.sha }}   # unique tag per commit, so every image can be traced back to a commit
 
 defaults:
@@ -82,7 +84,7 @@ jobs:
           if ($existing) { docker rm -f app-test | Out-Null }
 
   # ------------------------------------------------------------------
-  # Stage 3: PUSH - store the tested image in Amazon ECR
+  # Stage 3: PUSH - store the tested image in Amazon ECR (tags: commit SHA and "acc")
   # ------------------------------------------------------------------
   push:
     name: Push to ECR
@@ -103,34 +105,113 @@ jobs:
 
       - name: Tag and push image
         run: |
-          $localImage   = "${env:ECR_REPOSITORY}:${env:IMAGE_TAG}"
-          $remoteSha    = "$env:REGISTRY/${env:ECR_REPOSITORY}:${env:IMAGE_TAG}"
-          $remoteLatest = "$env:REGISTRY/${env:ECR_REPOSITORY}:latest"
+          # No "latest" here: latest is the production tag and only moves after my approval
+          $localImage = "${env:ECR_REPOSITORY}:${env:IMAGE_TAG}"
+          $remoteSha  = "$env:REGISTRY/${env:ECR_REPOSITORY}:${env:IMAGE_TAG}"
+          $remoteAcc  = "$env:REGISTRY/${env:ECR_REPOSITORY}:acc"
 
           docker tag $localImage $remoteSha
-          docker tag $localImage $remoteLatest
+          docker tag $localImage $remoteAcc
 
           docker push $remoteSha
           if ($LASTEXITCODE -ne 0) { throw "Push of $remoteSha failed" }
+          docker push $remoteAcc
+          if ($LASTEXITCODE -ne 0) { throw "Push of the acc tag failed" }
+
+  # ------------------------------------------------------------------
+  # Stage 4: DEPLOY ACCEPTANCE - automatic when everything before is green (push on green)
+  # ------------------------------------------------------------------
+  deploy-acc:
+    name: Deploy to acceptance
+    runs-on: [self-hosted, Windows]
+    needs: push
+    environment:
+      name: acceptance
+      url: ${{ steps.url.outputs.url }}   # link shown in the run and under Deployments
+    steps:
+      - name: Find the acceptance URL
+        id: url
+        run: |
+          $dns = (aws elbv2 describe-load-balancers --names $env:ALB_NAME --query "LoadBalancers[0].DNSName" --output text --region $env:AWS_REGION)
+          if ($LASTEXITCODE -ne 0) { throw "Could not find the load balancer $env:ALB_NAME" }
+          echo "url=https://${dns}:8443" >> $env:GITHUB_OUTPUT
+
+      - name: Roll out the new image on acceptance
+        run: |
+          aws ecs update-service --cluster $env:ECS_CLUSTER --service $env:ECS_SERVICE_ACC --force-new-deployment --region $env:AWS_REGION | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "ECS update-service (acceptance) failed" }
+          aws ecs wait services-stable --cluster $env:ECS_CLUSTER --services $env:ECS_SERVICE_ACC --region $env:AWS_REGION
+          if ($LASTEXITCODE -ne 0) { throw "The acceptance service did not become stable - check the ECS service events" }
+
+      - name: Smoke test acceptance
+        run: |
+          $url = "${{ steps.url.outputs.url }}"
+          $ok = $false
+          for ($i = 1; $i -le 10; $i++) {
+            # -k: the certificate is self-signed. -w adds the HTTP status code after the page.
+            $page = (curl.exe -k -s --max-time 5 -w "HTTP_STATUS=%{http_code}" $url) -join "`n"
+            if ($page -match 'HTTP_STATUS=200$' -and $page -match "Innovatech Solutions") { $ok = $true; break }
+            Start-Sleep -Seconds 3
+          }
+          if (-not $ok) { throw "Smoke test failed: $url did not return HTTP 200 with the expected content" }
+          Write-Host "Smoke test passed: $url returns HTTP 200 and the expected content"
+
+  # ------------------------------------------------------------------
+  # Stage 5: DEPLOY PRODUCTION - waits for my approval (required reviewer on the environment)
+  # ------------------------------------------------------------------
+  deploy-prod:
+    name: Deploy to production
+    runs-on: [self-hosted, Windows]
+    needs: deploy-acc
+    environment:
+      name: production
+      url: ${{ steps.url.outputs.url }}
+    steps:
+      - name: Find the production URL and the ECR registry
+        id: url
+        run: |
+          $dns = (aws elbv2 describe-load-balancers --names $env:ALB_NAME --query "LoadBalancers[0].DNSName" --output text --region $env:AWS_REGION)
+          if ($LASTEXITCODE -ne 0) { throw "Could not find the load balancer $env:ALB_NAME" }
+          echo "url=https://$dns" >> $env:GITHUB_OUTPUT
+
+          $accountId = (aws sts get-caller-identity --query Account --output text)
+          if ($LASTEXITCODE -ne 0) { throw "AWS credentials are missing or expired" }
+          echo "REGISTRY=$accountId.dkr.ecr.$env:AWS_REGION.amazonaws.com" >> $env:GITHUB_ENV
+
+      - name: Log in to ECR
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%p in (`aws ecr get-login-password --region %AWS_REGION%`) do (echo %%p| docker login --username AWS --password-stdin %REGISTRY%)
+
+      - name: Promote the tested image to latest
+        run: |
+          # The exact image that passed acceptance (same commit SHA) gets the tag latest. No new build.
+          $remoteSha    = "$env:REGISTRY/${env:ECR_REPOSITORY}:${env:IMAGE_TAG}"
+          $remoteLatest = "$env:REGISTRY/${env:ECR_REPOSITORY}:latest"
+
+          docker pull $remoteSha
+          if ($LASTEXITCODE -ne 0) { throw "Pull of $remoteSha failed" }
+          docker tag $remoteSha $remoteLatest
           docker push $remoteLatest
           if ($LASTEXITCODE -ne 0) { throw "Push of the latest tag failed" }
 
-  # ------------------------------------------------------------------
-  # Stage 4: DEPLOY - roll out the new image to the Fargate tasks
-  # ------------------------------------------------------------------
-  deploy:
-    name: Deploy to ECS
-    runs-on: [self-hosted, Windows]
-    needs: push
-    environment: dev   # shows up under Deployments in GitHub (deployment tracking)
-    steps:
-      - name: Force new ECS deployment
+      - name: Rolling update of production (zero downtime)
         run: |
-          aws ecs update-service --cluster $env:ECS_CLUSTER --service $env:ECS_SERVICE --force-new-deployment --region $env:AWS_REGION | Out-Null
-          if ($LASTEXITCODE -ne 0) { throw "ECS update-service failed" }
+          # Minimum healthy 100% / maximum 200%: new tasks start first, the ALB only sends traffic
+          # to them when the health check passes, and only then the old tasks are stopped.
+          aws ecs update-service --cluster $env:ECS_CLUSTER --service $env:ECS_SERVICE_PROD --force-new-deployment --region $env:AWS_REGION | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "ECS update-service (production) failed" }
+          aws ecs wait services-stable --cluster $env:ECS_CLUSTER --services $env:ECS_SERVICE_PROD --region $env:AWS_REGION
+          if ($LASTEXITCODE -ne 0) { throw "The production service did not become stable - check the ECS service events" }
 
-      - name: Wait until the service is stable
+      - name: Smoke test production
         run: |
-          aws ecs wait services-stable --cluster $env:ECS_CLUSTER --services $env:ECS_SERVICE --region $env:AWS_REGION
-          if ($LASTEXITCODE -ne 0) { throw "The service did not become stable - check the ECS service events" }
-          Write-Host "Deployment of $env:IMAGE_TAG finished: new tasks are running and healthy"
+          $url = "${{ steps.url.outputs.url }}"
+          $ok = $false
+          for ($i = 1; $i -le 10; $i++) {
+            $page = (curl.exe -k -s --max-time 5 -w "HTTP_STATUS=%{http_code}" $url) -join "`n"
+            if ($page -match 'HTTP_STATUS=200$' -and $page -match "Innovatech Solutions") { $ok = $true; break }
+            Start-Sleep -Seconds 3
+          }
+          if (-not $ok) { throw "Smoke test failed: $url did not return HTTP 200 with the expected content" }
+          Write-Host "Release $env:IMAGE_TAG is live on production: $url"
